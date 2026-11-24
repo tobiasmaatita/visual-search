@@ -83,4 +83,13 @@ ONNX models go in `models/` (gitignored):
 - `models/sam3/`: SAM3, split into vision encoder, geometry encoder, decoder and text encoder.
 - `models/rf-detr/`: RF-DETR small and seg-small.
 
+SAM3 needs the optional ONNX extra. The fp16 export is expected as `models/sam3/{vision-encoder,geometry-encoder,decoder}-fp16.onnx`. The adapter hasn't been run on the real model yet, so check it on target hardware first:
+
+```bash
+uv sync --extra onnx
+uv run python scripts/try_sam3.py data/bank_01/img-001.png --box 63 335 535 568
+```
+
+A plain `uv sync` (without `--extra onnx`) uninstalls onnxruntime again.
+
 DINOv2 is loaded with PyTorch from Hugging Face (`facebook/dinov2-small` by default; it's downloaded on first use). Extracted features are cached in `cache/` (gitignored), keyed by image content and model configuration. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.

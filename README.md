@@ -24,7 +24,7 @@ The main experiment notebook is [notebooks/cascade.ipynb](notebooks/cascade.ipyn
 uv run jupyter lab
 ```
 
-Open `notebooks/cascade.ipynb`. The default "Python 3" kernel is the project's `.venv`.
+Open `notebooks/cascade.ipynb`. The default "Python 3" kernel is the project's `.venv`. The **Interactive search** section at the bottom lets you pick a query, draw a box or click points, preview the mask and browse the results. It uses ipympl (`%matplotlib widget`), which is included in the dependencies.
 
 To use the environment from a JupyterLab installed elsewhere, register it as a named kernel instead:
 

@@ -124,6 +124,11 @@ class Cascade:
         self._gallery: dict[str, Item] | None = None
 
     @property
+    def is_prepared(self) -> bool:
+        """Return True once :meth:`prepare` has indexed a gallery."""
+        return self._gallery is not None
+
+    @property
     def name(self) -> str:
         """Return a readable identifier, e.g. ``"color_hist@100 > sift@20"``."""
         parts = [f"{self.retriever.name}@{self.retrieval_k}"] + [f"{s.name}@{s.top_k}" for s in self.stages]

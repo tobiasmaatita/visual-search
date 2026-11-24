@@ -21,13 +21,16 @@ class Candidate:
     Attributes:
         item_id: Id of the gallery item.
         score: Ranking score of the stage that produced this candidate (higher is better).
-        features: Named score components (e.g. ``{"cosine": 0.83, "inliers": 41}``),
+        features: Named numeric score components (e.g. ``{"cosine": 0.83, "inliers": 41}``),
             filled by later stages for inspection and learned combiners.
+        artifacts: Non-numeric by-products for inspection (correspondences, fitted
+            models), e.g. for the pair detail view. Not used for ranking.
     """
 
     item_id: str
     score: float
     features: dict[str, Any] = field(default_factory=dict)
+    artifacts: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 class Retriever(ABC):

@@ -85,6 +85,30 @@ def prompt_patch_mask(
     return sel
 
 
+def prompt_to_mask(prompt: Prompt | None, image_hw: tuple[int, int], min_size: int = 16) -> NDArray[np.bool_] | None:
+    """Return the region a prompt designates as a pixel mask.
+
+    Mask prompts are returned as-is, boxes and points become their (minimum-size)
+    rectangle. Use a :class:`~visual_search.masking.base.Masker` for real object masks.
+
+    Args:
+        prompt: The prompt, or ``None``.
+        image_hw: ``(H, W)``.
+        min_size: Minimum rectangle side for point prompts.
+
+    Returns:
+        ``(H, W)`` bool mask, or ``None`` without a prompt.
+    """
+    if prompt is None:
+        return None
+    if prompt.mask is not None:
+        return prompt.mask
+    x0, y0, x1, y1 = prompt_box(prompt, image_hw, min_size=min_size)
+    mask = np.zeros(image_hw, bool)
+    mask[y0:y1, x0:x1] = True
+    return mask
+
+
 def crop_to_prompt(image: NDArray[np.uint8], prompt: Prompt | None, pad: float = 0.0) -> NDArray[np.uint8]:
     """Crop an image to the (padded) box around a prompt; no prompt keeps the full image.
 

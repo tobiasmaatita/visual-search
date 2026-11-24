@@ -45,8 +45,11 @@ from visual_search.eval import evaluate, comparison_table
 from visual_search.models.dinov2 import Dinov2Backbone
 from visual_search.retrieval import DinoRetriever
 
+from visual_search.stages import SparseVerificationStage
+
 retriever = DinoRetriever(Dinov2Backbone("facebook/dinov2-small"), pooling="crop_cls", cache_dir="cache")
-report = evaluate(Cascade(retriever, retrieval_k=100), split)
+stage2 = SparseVerificationStage("sift", top_k=20, model_type="H", method="magsac", cache_dir="cache")
+report = evaluate(Cascade(retriever, retrieval_k=100, stages=[stage2]), split)
 report.metrics      # R@1, R@5, MRR per stage
 report.latency      # median / p95 ms per stage and total
 report.per_query    # rank and top-1 per query, for failure inspection

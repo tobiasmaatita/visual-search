@@ -2,6 +2,7 @@
 
 Newest first. One entry per significant change; see CLAUDE.md for the rules.
 
+- 2026-11-24: [Stage 2: sparse matching (SIFT/RootSIFT) + geometric verification, pair detail view](2026-11-24-07-sparse-verification-sift.md)
 - 2026-11-24: [Interactive prompting UI and stage-1 results gallery](2026-11-24-06-interactive-ui.md)
 - 2026-11-24: [Masking interface and SAM3 adapter (code only, not run on the real model)](2026-11-24-05-sam3-masker-untested.md)
 - 2026-11-24: [Stage 1: DINOv2-small retrieval with prompt-focused pooling and a feature cache](2026-11-24-04-dinov2-retrieval.md)

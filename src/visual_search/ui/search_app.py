@@ -22,10 +22,12 @@ from numpy.typing import NDArray
 from visual_search.cache import image_fingerprint
 from visual_search.cascade import Cascade, QueryResult
 from visual_search.data.schema import Item, Prompt, is_match
+from visual_search.imaging import prompt_to_mask
 from visual_search.masking.base import BoxMasker, Masker, MaskResult, with_mask
 from visual_search.ui.prompt_widget import PromptWidget
 from visual_search.viz.gallery import render_ranking_grid, thumbnail
 from visual_search.viz.overlay import overlay_mask
+from visual_search.viz.pairs import render_pair_detail
 
 
 class SearchApp:
@@ -93,6 +95,10 @@ class SearchApp:
         self.search_button = widgets.Button(description="Search", button_style="primary")
         self.info = widgets.HTML()
         self.results = widgets.Image(format="png", layout=widgets.Layout(max_width="100%"))
+        self.detail_select = widgets.Dropdown(options=[], value=None, description="Detail",
+                                              layout=widgets.Layout(width="70%"))
+        self.detail = widgets.Image(format="png", layout=widgets.Layout(max_width="100%"))
+        self._query_item: Item | None = None
         self.prompt_widget = PromptWidget(on_change=self._prompt_changed)
         self.widget = widgets.VBox([
             widgets.HBox([self.query_select, self.path_text, self.load_button]),
@@ -100,10 +106,13 @@ class SearchApp:
             widgets.HBox([self.use_mask, self.search_button]),
             self.info,
             self.results,
+            self.detail_select,
+            self.detail,
         ])
         self.query_select.observe(self._query_selected, names="value")
         self.load_button.on_click(lambda _: self.load_path(self.path_text.value))
         self.search_button.on_click(lambda _: self.search())
+        self.detail_select.observe(lambda ch: self.show_detail(ch["new"]), names="value")
         if self.queries:
             self.query_select.value = 0
 
@@ -121,6 +130,7 @@ class SearchApp:
         self.mask_result = None
         self.last_result = None
         self.results.value = b""
+        self._reset_detail()
         self.prompt_widget.set_image(self._image)
         self.info.value = f"Query <b>{html.escape(item.item_id)}</b> (label: {html.escape(str(item.label))})"
         if item.prompt is not None and item.prompt.mask is None:
@@ -155,8 +165,53 @@ class SearchApp:
         result = self.cascade.run(item)
         self.last_result = result
         self.timings = {**timings, **result.timings}
+        self._query_item = item
         self._render(result, item)
+        self._fill_detail_options(result)
         return result
+
+    def show_detail(self, rank: int | None) -> None:
+        """Render the pair detail view for the candidate at 0-based ``rank`` of the final ranking.
+
+        Shows matches/inliers and the warp if the candidate went through a matching
+        stage; otherwise only its scores.
+
+        Args:
+            rank: Position in ``last_result.final``; ``None`` clears the view.
+        """
+        if rank is None or self.last_result is None or self._query_item is None or self._image is None:
+            self.detail.value = b""
+            return
+        cand = self.last_result.final[rank]
+        corr = cand.artifacts.get("correspondences")
+        if corr is None:
+            self.detail.value = b""
+            self.info.value += " &mdash; no match details for this candidate (not re-ranked by a matcher)"
+            return
+        item = self.gallery[cand.item_id]
+        image_c = item.load_image()
+        feats = ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in cand.features.items())
+        self.detail.value = render_pair_detail(
+            self._image, image_c, corr, cand.artifacts.get("verification"),
+            mask_q=prompt_to_mask(self._query_item.prompt, self._image.shape[:2]),
+            mask_c=prompt_to_mask(item.prompt, image_c.shape[:2]),
+            title=f"#{rank + 1} {cand.item_id} (label {item.label}) | {feats}",
+            accepted=bool(cand.artifacts.get("accepted", True)),
+        )
+
+    def _reset_detail(self) -> None:
+        """Clear the detail selector and view."""
+        self.detail_select.options = []
+        self.detail_select.value = None
+        self.detail.value = b""
+
+    def _fill_detail_options(self, result: QueryResult) -> None:
+        """Offer the final top-k candidates in the detail dropdown."""
+        self._reset_detail()
+        self.detail_select.options = [
+            (f"#{i + 1} {c.item_id} ({self.gallery[c.item_id].label}) score {c.score:.3f}", i)
+            for i, c in enumerate(result.final[: self.top_k])
+        ]
 
     # --- internals ----------------------------------------------------------------
 

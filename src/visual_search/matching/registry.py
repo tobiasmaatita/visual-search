@@ -21,6 +21,8 @@ _REGISTRY: dict[str, type[Matcher]] = {}
 #: Name -> module that registers it, so heavy matchers are only imported when requested.
 _LAZY_MODULES: dict[str, str] = {
     "sift": "visual_search.matching.sift",
+    "aliked-lightglue": "visual_search.matching.lightglue",
+    "xfeat-lighterglue": "visual_search.matching.lightglue",
 }
 
 

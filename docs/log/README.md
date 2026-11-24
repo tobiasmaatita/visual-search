@@ -2,6 +2,7 @@
 
 Newest first. One entry per significant change; see CLAUDE.md for the rules.
 
+- 2026-11-24: [Learned sparse matchers: ALIKED + LightGlue, XFeat + LighterGlue](2026-11-24-08-learned-sparse-matchers.md)
 - 2026-11-24: [Stage 2: sparse matching (SIFT/RootSIFT) + geometric verification, pair detail view](2026-11-24-07-sparse-verification-sift.md)
 - 2026-11-24: [Interactive prompting UI and stage-1 results gallery](2026-11-24-06-interactive-ui.md)
 - 2026-11-24: [Masking interface and SAM3 adapter (code only, not run on the real model)](2026-11-24-05-sam3-masker-untested.md)

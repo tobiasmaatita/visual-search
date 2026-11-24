@@ -12,8 +12,8 @@ The assignment is in [TASK.md](TASK.md), the working rules in [CLAUDE.md](CLAUDE
 Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+. [mlcvtools](../mlcvtools) must be checked out next to this repo; it's installed as an editable path dependency.
 
 ```bash
-uv sync                 # create .venv with all base + dev dependencies
-uv run pytest           # run the tests
+uv sync --extra onnx --extra sparse   # base + dev + SAM3 runtime + learned matchers (kornia)
+uv run pytest                         # run the tests
 uv run ruff check src tests
 ```
 
@@ -93,6 +93,6 @@ uv sync --extra onnx
 uv run python scripts/try_sam3.py data/bank_01/img-001.png --box 63 335 535 568
 ```
 
-A plain `uv sync` (without `--extra onnx`) uninstalls onnxruntime again.
+A plain `uv sync` without the extras uninstalls onnxruntime and kornia again. The learned matchers (`aliked-lightglue`, `xfeat-lighterglue`) download their weights (about 67 MB) to `~/.cache/torch/hub/checkpoints` on first use.
 
 DINOv2 is loaded with PyTorch from Hugging Face (`facebook/dinov2-small` by default; it's downloaded on first use). Extracted features are cached in `cache/` (gitignored), keyed by image content and model configuration. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.

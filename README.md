@@ -17,7 +17,38 @@ uv run pytest           # run the tests
 uv run ruff check src tests
 ```
 
-The Jupyter notebook and kernel instructions will be added in a later step.
+### Notebook
+The main experiment notebook is [notebooks/cascade.ipynb](notebooks/cascade.ipynb). JupyterLab is a dev dependency, so after `uv sync`:
+
+```bash
+uv run jupyter lab
+```
+
+Open `notebooks/cascade.ipynb`. The default "Python 3" kernel is the project's `.venv`.
+
+To use the environment from a JupyterLab installed elsewhere, register it as a named kernel instead:
+
+```bash
+uv run python -m ipykernel install --user --name visual-search
+```
+
+To run the notebook headless (a smoke check):
+
+```bash
+cd notebooks && uv run jupyter nbconvert --to notebook --execute --stdout cascade.ipynb > /dev/null
+```
+
+### Evaluating a pipeline in code
+```python
+from visual_search.cascade import Cascade
+from visual_search.eval import evaluate, comparison_table
+from visual_search.retrieval import ColorHistogramRetriever
+
+report = evaluate(Cascade(ColorHistogramRetriever(), retrieval_k=100), split)
+report.metrics      # R@1, R@5, MRR per stage
+report.latency      # median / p95 ms per stage and total
+report.per_query    # rank and top-1 per query, for failure inspection
+```
 
 ## Data
 Real images live in `data/`. This folder is gitignored and never committed. Use one folder per physical instance; the folder name is the label:

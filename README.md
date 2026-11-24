@@ -42,9 +42,11 @@ cd notebooks && uv run jupyter nbconvert --to notebook --execute --stdout cascad
 ```python
 from visual_search.cascade import Cascade
 from visual_search.eval import evaluate, comparison_table
-from visual_search.retrieval import ColorHistogramRetriever
+from visual_search.models.dinov2 import Dinov2Backbone
+from visual_search.retrieval import DinoRetriever
 
-report = evaluate(Cascade(ColorHistogramRetriever(), retrieval_k=100), split)
+retriever = DinoRetriever(Dinov2Backbone("facebook/dinov2-small"), pooling="crop_cls", cache_dir="cache")
+report = evaluate(Cascade(retriever, retrieval_k=100), split)
 report.metrics      # R@1, R@5, MRR per stage
 report.latency      # median / p95 ms per stage and total
 report.per_query    # rank and top-1 per query, for failure inspection
@@ -81,4 +83,4 @@ ONNX models go in `models/` (gitignored):
 - `models/sam3/`: SAM3, split into vision encoder, geometry encoder, decoder and text encoder.
 - `models/rf-detr/`: RF-DETR small and seg-small.
 
-DINOv2 is loaded with PyTorch from Hugging Face. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.
+DINOv2 is loaded with PyTorch from Hugging Face (`facebook/dinov2-small` by default; it's downloaded on first use). Extracted features are cached in `cache/` (gitignored), keyed by image content and model configuration. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.

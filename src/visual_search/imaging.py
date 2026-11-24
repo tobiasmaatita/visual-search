@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -36,6 +37,52 @@ def prompt_box(
     ix0, iy0 = int(np.floor(max(cx - bw / 2, 0))), int(np.floor(max(cy - bh / 2, 0)))
     ix1, iy1 = int(np.ceil(min(cx + bw / 2, w))), int(np.ceil(min(cy + bh / 2, h)))
     return ix0, iy0, max(ix1, ix0 + 1), max(iy1, iy0 + 1)
+
+
+def prompt_patch_mask(
+    prompt: Prompt | None, image_hw: tuple[int, int], grid_hw: tuple[int, int]
+) -> NDArray[np.bool_]:
+    """Map a prompt onto a ViT patch grid that covers the whole (resized) image.
+
+    The image is assumed to be resized to the grid without cropping, so patch
+    ``(i, j)`` covers the image region ``[j*W/gw, (j+1)*W/gw) x [i*H/gh, (i+1)*H/gh)``.
+
+    - No prompt: all patches.
+    - Box / points: patches whose center lies inside the prompt box (points use
+      the box around the positive points, at least one patch wide).
+    - Mask: patches whose area is at least half covered by the mask.
+
+    If no patch qualifies (tiny prompt), the patch at the prompt center is used, so
+    the result is never empty.
+
+    Args:
+        prompt: The visual prompt, or ``None``.
+        image_hw: Original image ``(H, W)``.
+        grid_hw: Patch grid ``(gh, gw)``.
+
+    Returns:
+        ``(gh, gw)`` bool array.
+    """
+    gh, gw = grid_hw
+    h, w = image_hw
+    if prompt is None:
+        return np.ones((gh, gw), bool)
+    if prompt.mask is not None:
+        frac = cv2.resize(prompt.mask.astype(np.float32), (gw, gh), interpolation=cv2.INTER_AREA)
+        sel = frac >= 0.5
+        if not sel.any():
+            sel = frac == frac.max()
+        return sel
+    min_size = int(np.ceil(max(h / gh, w / gw)))
+    x0, y0, x1, y1 = prompt_box(prompt, (h, w), pad=0.0, min_size=min_size)
+    cx = (np.arange(gw) + 0.5) * w / gw
+    cy = (np.arange(gh) + 0.5) * h / gh
+    sel = ((cy >= y0) & (cy < y1))[:, None] & ((cx >= x0) & (cx < x1))[None, :]
+    if not sel.any():
+        i = min(int((y0 + y1) / 2 * gh / h), gh - 1)
+        j = min(int((x0 + x1) / 2 * gw / w), gw - 1)
+        sel[i, j] = True
+    return sel
 
 
 def crop_to_prompt(image: NDArray[np.uint8], prompt: Prompt | None, pad: float = 0.0) -> NDArray[np.uint8]:

@@ -223,7 +223,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Directories
-models/
+/models/
 
 # Claude
 .idea/
@@ -235,4 +235,4 @@ models/
 
 # visual-search local data and caches
 /data/
-/cache/
+cache/

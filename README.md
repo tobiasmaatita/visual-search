@@ -1,2 +1,53 @@
 # visual-search
-Exploratieweek visual search
+
+Exploration week: visual search. This repo builds a cascade for finding the *same instance* of a visually prompted object:
+
+- **Stage 1:** DINOv2 retrieval.
+- **Stage 2:** sparse geometric verification.
+- **Stage 3:** dense matching and scoring.
+
+The assignment is in [TASK.md](TASK.md), the working rules in [CLAUDE.md](CLAUDE.md), and the change log in [docs/log/](docs/log/README.md).
+
+## Setup
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+. [mlcvtools](../mlcvtools) must be checked out next to this repo; it's installed as an editable path dependency.
+
+```bash
+uv sync                 # create .venv with all base + dev dependencies
+uv run pytest           # run the tests
+uv run ruff check src tests
+```
+
+The Jupyter notebook and kernel instructions will be added in a later step.
+
+## Data
+Real images live in `data/`. This folder is gitignored and never committed. Use one folder per physical instance; the folder name is the label:
+
+```
+data/
+  bank_01/          # >= 2 photos of the same physical object
+    a.jpg
+    b.jpg
+  billy_01/
+    ...
+  singletons/       # label=None distractors (also accepted: _distractors/, distractors/)
+    room.jpg
+  prompts.json      # optional: {"bank_01/a.jpg": {"box": [x0, y0, x1, y1]}}
+```
+
+Keep original JPG or PNG files. Convert HEIC to JPG first.
+
+```python
+from visual_search.data import load_folder_dataset, split_dataset, make_synthetic_dataset
+
+split = split_dataset(load_folder_dataset("data"), seed=0, strict=False)
+smoke = split_dataset(make_synthetic_dataset(seed=0), seed=0)  # SMOKE TEST ONLY
+```
+
+To read annotations drawn in mlcvtools' `visual-search.ipynb` (`own-annotations.json`), use `load_mlcvtools_annotations(path, image_root)`.
+
+## Models
+ONNX models go in `models/` (gitignored):
+- `models/sam3/`: SAM3, split into vision encoder, geometry encoder, decoder and text encoder.
+- `models/rf-detr/`: RF-DETR small and seg-small.
+
+DINOv2 is loaded with PyTorch from Hugging Face. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.

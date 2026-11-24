@@ -221,3 +221,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Directories
+models/
+
+# Claude
+.idea/
+.claude/
+
+# Other
+**/.DS_Store
+.python-version
+
+# visual-search local data and caches
+/data/
+/cache/

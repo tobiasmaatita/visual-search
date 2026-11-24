@@ -1,0 +1,38 @@
+[project]
+name = "visual-search"
+version = "0.1.0"
+description = "Instance-level re-ranking cascade for visual prompting (retrieval -> geometric verification -> dense matching)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mlcvtools",
+    "numpy>=2.5.5",
+    "opencv-python-headless>=4.10,<5",
+    "pillow>=13.0.0",
+    "pyyaml>=6.0.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/visual_search"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+mlcvtools = { path = "../mlcvtools", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]

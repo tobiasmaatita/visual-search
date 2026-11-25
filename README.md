@@ -6,6 +6,8 @@ Exploration week: visual search. This repo builds a cascade for finding the *sam
 - **Stage 2:** sparse geometric verification.
 - **Stage 3:** dense matching and scoring.
 
+**Start with the [repository guide](docs/guide.md).** It covers how to use the code, what data to provide, what the notebook shows, which models and matchers exist, and how to add new ones.
+
 The assignment is in [TASK.md](TASK.md), the working rules in [CLAUDE.md](CLAUDE.md), and the change log in [docs/log/](docs/log/README.md).
 
 ## Setup

@@ -147,6 +147,21 @@ You don't label queries and gallery separately. The code **splits your labelled 
 
 A result is correct when the query and the gallery image have the same label, and the label isn't `None`. Distractors are never correct.
 
+### Exact item or same model?
+
+Your use case has two levels of "the same", both stricter than "the same kind of thing":
+- **Exact instance:** this physical sofa, photographed in other rooms or from other angles.
+- **Same model:** any sofa of this product line, such as the two different sofas in `data/bank_01/`.
+
+The scoring rule above has a single level: whatever you put in one folder counts as "the same". Today, `bank_01` is therefore evaluated as a *model*-level match.
+
+The planned way to support both levels needs no change to the folder layout:
+- the folder (label) stays the **instance**;
+- an optional `group` key names the **model** (the schema already keeps such extra keys);
+- the evaluation then reports Recall for both levels side by side.
+
+Until that exists, choose per folder what you want to measure. Note also that geometric verification (stage 2) is an instance-level tool: two physical copies of a model share their shape but not their exact creases and wear.
+
 Before splitting, the validator checks the dataset and reports problems. The most common is an object folder with only one image (currently `billy_01`). In the notebook's lenient mode such objects are dropped from evaluation with a warning instead of stopping the run.
 
 ### Prompts: telling the system *which* object you mean
@@ -539,7 +554,7 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 - **The gallery is compared as whole images** (see [section 4](#4-how-a-search-works-the-pipeline)). This is the main weakness for cluttered scenes.
 - **Masks are boxes.** SAM3 masks are wired in but unvalidated.
 - **Stage 2 scores by inlier count only,** which gave one false verification on real data (ALIKED on a room photo) and favors textured objects.
-- **The real dataset is too small to measure anything yet** (one query). Note also that `bank_01` may show two *different* sofas of the same model; if so, they need separate labels.
+- **The real dataset is too small to measure anything yet** (one query). Also, `bank_01` holds two *different* sofas of the same model, so it currently measures model-level rather than instance-level matching (see [Exact item or same model?](#exact-item-or-same-model)).
 - **Latency was measured on an 8 GB M2 development machine,** not on the target 16 GB Mac or the GPU server.
 
 **Next steps.**
@@ -551,4 +566,4 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 **What you can do now.**
 - Add more real photos, with several objects and at least two photos each.
 - Test SAM3 fp16 on your 16 GB Mac and on the GPU server with `scripts/try_sam3.py`.
-- Confirm the `bank_01` labelling.
+- Decide how to label "same model": in the same folder, or in separate folders once `group` labels are supported.

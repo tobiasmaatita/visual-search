@@ -144,15 +144,15 @@ That depends on what you want to do:
 | Goal | What needs a label |
 |---|---|
 | **Interactive exploration** (load any image, draw a box, browse results) | Nothing. Load a query from any path; the gallery can be unlabelled. You just won't get ✓/✗ marks. |
-| **Evaluation** (Recall@1/5, MRR) | Every image of every object you want measured: it must be in its object's folder. Distractors stay unlabelled. |
-| **A "hard negative"** (same model, different physical object) | Give it its *own* folder (e.g. `bank_02/`), not the same label. An optional `group` key can later mark such look-alike groups (see below). |
+| **Evaluation** (Recall@1/5, MRR) | Every image of every object you want measured: it must be in its object's folder (or boxed and labelled in the test set). Distractors stay unlabelled. |
+| **A "hard negative"** (same model, different physical object) | Give it its *own* label (e.g. `bank_02`), not the same label. The optional `group` field marks such look-alike groups (see below). |
 
 You don't label queries and gallery separately. The code **splits your labelled data itself** ([`data/split.py`](../src/visual_search/data/split.py)):
-- For every object, one image (configurable) is drawn at random as the query; the rest stay in the gallery.
+- For every object, one image or box (configurable) is drawn at random as the query; the rest stay in the gallery.
 - All distractors go to the gallery.
 - The draw is reproducible from a seed and doesn't depend on file order.
 
-A result is correct when the query and the gallery image have the same label, and the label isn't `None`. Distractors are never correct.
+A result is correct when the query and the gallery item have the same label, and the label isn't `None`. Distractors are never correct.
 
 ### The labelled test set (`annotations.json`)
 
@@ -182,16 +182,13 @@ Your use case has two levels of "the same", both stricter than "the same kind of
 - **Exact instance:** this physical sofa, photographed in other rooms or from other angles.
 - **Same model:** any sofa of this product line, such as the two different sofas in `data/bank_01/`.
 
-The scoring rule above has a single level: whatever you put in one folder counts as "the same". Today, `bank_01` is therefore evaluated as a *model*-level match.
+The scoring rule above has a single level: whatever shares a label counts as "the same". Today, `bank_01` is therefore evaluated as a *model*-level match.
 
-The planned way to support both levels needs no change to the folder layout:
-- the folder (label) stays the **instance**;
-- an optional `group` key names the **model** (the schema already keeps such extra keys);
-- the evaluation then reports Recall for both levels side by side.
+The planned way to support both levels: the label stays the **instance**, the optional `group` names the **model**, and the evaluation reports Recall for both levels side by side. The labeling notebook already records the `group`; reporting metrics per group comes with the evaluation notebook. Until then, choose per label what you want to measure.
 
-The labeling notebook already records the `group`. Reporting metrics per group comes with the evaluation work. Until then, choose per label what you want to measure. Note also that geometric verification (stage 2) is an instance-level tool: two physical copies of a model share their shape but not their exact creases and wear.
+Note also that geometric verification (stage 2) is an instance-level tool: two physical copies of a model share their shape but not their exact creases and wear.
 
-Before splitting, the validator checks the dataset and reports problems. The most common is an object folder with only one image (currently `billy_01`). In the notebook's lenient mode such objects are dropped from evaluation with a warning instead of stopping the run.
+Before splitting, the validator checks the dataset and reports problems. The most common is an object with only one image or box (currently `billy_01`). In the notebook's lenient mode such objects are dropped from evaluation with a warning instead of stopping the run.
 
 ### Prompts: telling the system *which* object you mean
 
@@ -204,11 +201,11 @@ A photo often shows several objects, so a query can carry a **prompt**, meaning 
 ```
 
 - **In the notebook** you draw prompts with the mouse.
-- **For a dataset**, put them in `data/prompts.json`, keyed by relative image path:
+- **For a folder-per-object dataset**, put them in `data/prompts.json`, keyed by relative image path:
   ```json
   {"bank_01/img-002.png": {"box": [63, 335, 535, 568]}}
   ```
-- **Without a prompt**, the whole image counts as the object. That's fine for product-style photos with one object, but poor for room scenes. Your current `data/` has no prompts.
+- **Without a prompt**, the whole image counts as the object. That's fine for product-style photos with one object, but poor for room scenes.
 
 Gallery images may also have prompts; the boxes of your labelled test set are exactly that. Then matching on the gallery side is restricted to that box. Unlabelled photo collections have no boxes; there, grounding finds the object in each photo (see [section 4](#4-how-a-search-works-the-pipeline)).
 
@@ -220,7 +217,7 @@ Under the folder convention, a dataset is simply a **list of dicts**, the format
 {"input_image": <path | PIL image | numpy array>, "label": "bank_01" or None, "prompt": {...}, ...}
 ```
 
-Any other key (for example a future `"group"` for hard-negative groups) is kept untouched in `Item.extra`, so the schema can grow without code changes. Besides the folder loader there are:
+Any other key (for example `"group"`) is kept untouched in `Item.extra`, so the schema can grow without code changes. Besides the folder loader and the test set there are:
 - **`load_gallery(source)`:** an unlabelled gallery from a folder, a glob pattern or a list of files (used by "Search a new gallery").
 - **`load_image_folder(dir)`:** a folder of distractors from anywhere, e.g. a COCO image directory.
 - **`load_mlcvtools_annotations(json, image_root)`:** reads the boxes you drew in mlcvtools' `visual-search.ipynb` (`own-annotations.json`).
@@ -261,7 +258,7 @@ Stage 1 is a **semantic search**. [DINOv2](https://github.com/facebookresearch/d
 
 Stage 2 is the **instance check**. It finds distinctive local points (corners, texture details) in both images and pairs them up. It then asks whether a single geometric transformation explains many of those pairs at once. If yes, the two images very likely show the same physical surface. The count of pairs that agree (*inliers*) becomes the new score.
 
-DINOv2 is **not** an object detector here. It produces a description vector, not boxes.
+DINOv2 is **not** an object detector here. It produces a description vector (and patch features), not boxes; grounding (below) turns the patch features into regions.
 
 ### What exactly is compared: boxes or whole images?
 
@@ -300,13 +297,13 @@ Grounding is *semantic*: it finds regions that *look like* your object (e.g. a d
 When you press **Search** in the notebook, or call `cascade.run(query)`:
 
 1. **Mask:** the `Masker` turns your prompt into a pixel mask. Today that's `BoxMasker`, which uses the box itself as the mask. The mask replaces the prompt on a copy of the query item (`with_mask`), so every later step reads it the same way.
-2. **Stage 1:**
+2. **Stage 1** (default `DinoRetriever`, `crop_cls`):
    - The query is cropped to the mask's box, resized to 448×448 and run through DINOv2. Its CLS token is the query vector.
    - Gallery vectors were computed once when the gallery was indexed (`cascade.prepare`) and are cached on disk.
-   - One matrix product scores all gallery images; the 100 best are kept.
+   - One matrix product scores all gallery items; the 100 best are kept.
 3. **Stage 2,** for each of the top 20:
    - Load the gallery image's keypoints from the cache (computed once at indexing).
-   - Keep only the query keypoints inside the mask.
+   - Keep only the query keypoints inside the mask, and the gallery keypoints inside its box or found region.
    - Match descriptors: SIFT uses Lowe's ratio test plus a mutual-best check; ALIKED and XFeat use the LightGlue network.
    - Fit a homography with MAGSAC++ and count the inliers. Fewer than 8 means no match (0).
    - The new score is `inliers + stage-1 cosine`, so the cosine only breaks ties.
@@ -332,7 +329,7 @@ The SAM3 image encoding (about 120 MB per image) is kept only **in memory** for 
 
 There are two notebooks:
 - **`notebooks/labeling.ipynb`** builds your test set. It's described in [section 3](#the-labelled-test-set-annotationsjson).
-- **`notebooks/cascade.ipynb`** runs the experiments and the interactive search.
+- **`notebooks/cascade.ipynb`** runs the experiments and the interactive searches.
 
 In both, every code cell is preceded by a markdown cell explaining what it does. The cascade notebook has seven sections.
 
@@ -374,6 +371,8 @@ In both, every code cell is preceded by a markdown cell explaining what it does.
    - Right: the gallery image warped onto the query with the fitted homography. If the object is really the same, the warped outline (orange) sits on the object.
    - Matches the stage rejected (too few inliers) are labelled *REJECTED* and get no warp panel.
 
+After a search, `testset_app.last_result` holds all rankings and score components, and `testset_app.timings` the step timings.
+
 **7. Search a new gallery.** Search any collection of photos, with no labels needed.
 1. **Choose the gallery.** Set `GALLERY_SOURCE` to a folder (all images, including subfolders), a glob pattern (`"/path/**/*.jpg"`) or a list of file paths, and `TOP_N` to the number of results.
 2. **Build the app.** The cascade is `GroundedDinoRetriever` → SIFT verification of the top `max(SPARSE_K, TOP_N)` regions.
@@ -381,8 +380,6 @@ In both, every code cell is preceded by a markdown cell explaining what it does.
 4. **Read the results.** Each result is a crop around the **found region** (yellow box). There is no *Expected* field and no ✓/✗: you judge the results. **Detail** shows the keypoint matches inside the region.
 
 After a search, `gallery_app.last_result` holds every candidate with its `region`.
-
-After a search, `testset_app.last_result` holds all rankings and score components, and `testset_app.timings` the step timings.
 
 ---
 
@@ -422,14 +419,14 @@ Every thumbnail title reads, for example, `#1 41.623 ✓`, then the label, then 
 
 | Component | Set by | Meaning |
 |---|---|---|
-| `cosine` | stage 1 | DINOv2 cosine similarity. |
+| `cosine` | stage 1 | DINOv2 cosine similarity (with grounding: query vs found region). |
+| `peak` | grounding | The best single-patch similarity inside the region. |
+| `region_patches` | grounding | How many patches (of the 32×32 grid) the region's blob covers. |
 | `inliers` | stage 2 | Matches consistent with the fitted geometry. 0 if fewer than `min_inliers` (8). |
 | `inlier_ratio` | stage 2 | inliers / matches. High = the matches are mostly consistent. |
 | `matches` | stage 2 | Tentative matches before the geometric check. |
 | `residual_px` | stage 2 | Mean distance in pixels between where an inlier lands and where the model predicts it. Lower = tighter fit. |
 | `stage1` | stage 2 | The candidate's score from the previous stage. |
-| `peak` | grounding | The best single-patch similarity inside the region. |
-| `region_patches` | grounding | How many patches (of the 32×32 grid) the region's blob covers. |
 
 Inlier counts depend strongly on texture: a patterned cushion gives many, a plain upholstered sofa few. That is why step 7 adds more components (spatial coverage of the mask, mask overlap after warping, post-warp appearance difference, warp distortion) and a combiner, instead of relying on inliers alone.
 
@@ -454,7 +451,7 @@ The code separates **models** (neural networks that produce features or masks) f
 | Name | What it does | Use |
 |---|---|---|
 | `RandomRetriever` | Random order | Chance level for evaluation. |
-| `ColorHistogramRetriever` | HSV color histogram of the query region vs whole gallery images | Sanity baseline. |
+| `ColorHistogramRetriever` | HSV color histogram of the query region vs each gallery item's box (or whole image) | Sanity baseline. |
 | `DinoRetriever(pooling="crop_cls")` | DINOv2 CLS token of the query **cropped to its prompt** | **Default**, the best stage-1 mode so far. One extra model run per query. |
 | `DinoRetriever(pooling="masked_mean")` | Average of DINOv2 patch features **under the prompt**, from the full-image pass | Instant when the prompt changes (no extra model run). Weaker than `crop_cls` on synthetic data. Benefits most from real SAM3 masks. |
 | `DinoRetriever(pooling="cls")` | CLS token of the whole query image | Ablation: ignores the prompt. |
@@ -571,36 +568,36 @@ Use `timing.StageTimer` and `cache.FeatureCache` for consistent timings and cach
 
 ```
 src/visual_search/
-  data/         schema.py    Item, Prompt, is_match: the dataset format
-                folder.py    folder-per-object loader, load_gallery (folder / glob / list), mlcvtools importer
-                split.py     validator + seeded query/gallery split
-                synthetic.py SMOKE-TEST-ONLY generated data
-  models/       dinov2.py    DINOv2 backbone (CLS + patch features)
-  retrieval/    base.py      Retriever / EmbeddingRetriever / Candidate
-                index.py     exact cosine search
-                dino.py      DinoRetriever (cls / crop_cls / masked_mean)
-                baselines.py random, color histogram
-                grounding.py GroundedDinoRetriever, localize (find the object in each photo)
-  masking/      base.py      Masker, NoMasker, BoxMasker, with_mask
-                sam3.py      SAM3 ONNX adapter (untested on the real model)
-  matching/     base.py      Matcher, Features, Correspondences
-                registry.py  register_matcher / create_matcher
+  data/         schema.py       Item, Prompt, is_match: the dataset format
+                annotations.py  annotations.json: per-object boxes + labels, label checks
+                folder.py       folder-per-object loader, load_gallery (folder / glob / list), mlcvtools importer
+                split.py        validator + seeded query/gallery split
+                synthetic.py    SMOKE-TEST-ONLY generated data
+  models/       dinov2.py       DINOv2 backbone (CLS + patch features)
+  retrieval/    base.py         Retriever / EmbeddingRetriever / Candidate (with optional region)
+                index.py        exact cosine search
+                dino.py         DinoRetriever (cls / crop_cls / masked_mean)
+                grounding.py    GroundedDinoRetriever, localize (find the object in each photo)
+                baselines.py    random, color histogram
+  masking/      base.py         Masker, NoMasker, BoxMasker, with_mask
+                sam3.py         SAM3 ONNX adapter (untested on the real model)
+  matching/     base.py         Matcher, Features, Correspondences
+                registry.py     register_matcher / create_matcher
                 sift.py, lightglue.py   the matchers
-  geometry/     verify.py    homography / affine / fundamental, MAGSAC++ / RANSAC
-  stages/       sparse.py    SparseVerificationStage (stage 2)
-  cascade.py                 Cascade, RerankStage, QueryResult
-  eval/         metrics.py   Recall@k, MRR
-                harness.py   evaluate(), comparison_table()
-  cache.py                   on-disk feature cache
+  geometry/     verify.py       homography / affine / fundamental, MAGSAC++ / RANSAC
+  stages/       sparse.py       SparseVerificationStage (stage 2)
+  cascade.py                    Cascade, RerankStage, QueryResult
+  eval/         metrics.py      Recall@k, MRR
+                harness.py      evaluate(), comparison_table()
+  cache.py                      on-disk feature cache
   device.py, timing.py, imaging.py   helpers (device choice, stage timers, prompt→box/mask)
-  data/annotations.py        annotations.json: per-object boxes + labels, label checks
   ui/           prompt_widget.py  draw box / click points (ipympl)
                 labeling.py       the labeling app
-                search_app.py     the interactive app
+                search_app.py     the interactive search app
   viz/          gallery.py, pairs.py, overlay.py   result grid, match/warp view, mask overlays
 
 notebooks/labeling.ipynb  build your own test set (boxes + labels)
-notebooks/cascade.ipynb   orchestration and result tables
+notebooks/cascade.ipynb   experiments, test-set search, new-gallery search
 scripts/try_sam3.py       manual SAM3 go/no-go check (timings + overlay)
 tests/                    pytest suite, one file per area
 docs/log/                 change log: what changed, why, with numbers
@@ -617,7 +614,7 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 - **Grounding is coarse and semantic.** Regions sit on a 32×32 patch grid, and they find what *looks like* the object (a similar armchair for a sofa). Stage 2 still has to confirm the exact item. The thresholds (`delta`, `region_delta`) were tuned on synthetic data only.
 - **Masks are boxes.** SAM3 masks are wired in but unvalidated.
 - **Stage 2 scores by inlier count only,** which gave one false verification on real data (ALIKED on a room photo) and favors textured objects.
-- **The real dataset is too small to measure anything yet** (one query). Also, `bank_01` holds two *different* sofas of the same model, so it currently measures model-level rather than instance-level matching (see [Exact item or same model?](#exact-item-or-same-model)).
+- **There is no real test set yet,** so no real numbers. Also, `bank_01` holds two *different* sofas of the same model, so it measures model-level rather than instance-level matching (see [Exact item or same model?](#exact-item-or-same-model)).
 - **Latency was measured on an 8 GB M2 development machine,** not on the target 16 GB Mac or the GPU server.
 
 **Next steps.**
@@ -628,6 +625,6 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 
 **What you can do now.**
 - Label a test set in `notebooks/labeling.ipynb`, with several photos per object.
-- Add more real photos, with several objects and at least two photos each.
+- Try "Search a new gallery" (notebook section 7) on one of your own photo folders.
 - Test SAM3 fp16 on your 16 GB Mac and on the GPU server with `scripts/try_sam3.py`.
-- Decide how to label "same model": in the same folder, or in separate folders once `group` labels are supported.
+- Decide how to label "same model": the same label (model level), or separate labels that share a `group` (item level, with the model recorded).

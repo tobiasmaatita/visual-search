@@ -53,7 +53,7 @@ Model weights are downloaded on first use:
 
 The SAM3 and RF-DETR ONNX files are not downloaded; they live in `models/` (gitignored).
 
-### Run the notebook
+### Run the notebooks
 
 ```bash
 uv run --all-extras jupyter lab
@@ -64,13 +64,11 @@ Open one of the three notebooks in `notebooks/` and choose *Run → Run All Cell
 - `search.ipynb` is free play (search with your own boxes);
 - `evaluation.ipynb` measures and compares approaches.
 
-They are described in [section 5](#5-the-notebooks-cell-by-cell).
-
-The first run computes and caches features in `cache/`. Later runs reuse them and only pay for the queries.
+They are described in [section 5](#5-the-notebooks-cell-by-cell). The first run computes and caches features in `cache/`. Later runs reuse them and only pay for the queries.
 
 ### Use the code without the notebook
 
-Everything the notebook does is a few lines of Python:
+Everything the notebooks do is a few lines of Python:
 
 ```python
 from visual_search.data import AnnotationSet
@@ -103,7 +101,7 @@ result = cascade.run(query, exclude={query.item_id})   # one query
 uv run --all-extras pytest
 ```
 
-Tests that need the learned-matcher weights are skipped if those weights aren't downloaded.
+Tests that need the learned-matcher weights are skipped if those weights aren't downloaded, or if kornia was removed by a `uv run` without extras.
 
 ---
 
@@ -436,7 +434,7 @@ Each row is one pipeline, evaluated over all queries (leave-one-out: every label
 | **total_median_ms**, **total_p95_ms** | Search time per query (all stages, excluding indexing and, in leave-one-out, the query's own feature extraction): median and 95th percentile. |
 | **prepare_s** | Seconds spent indexing the gallery (offline, once; near zero when cached). |
 
-**Grounding table** (section 5): the same columns, for three galleries (annotated boxes, DINOv2 grounding, whole images), at stage 1 and after SIFT. Here a grounded result is correct when its region overlaps an annotated box of the query's label (model level: of its group) with IoU ≥ `IOU_THRESHOLD`. A whole-image result is correct when the photo contains such a box.
+**Grounding table** (evaluation section 5): the same columns, for three galleries (annotated boxes, DINOv2 grounding, whole images), at stage 1 and after SIFT. Here a grounded result is correct when its region overlaps an annotated box of the query's label (model level: of its group) with IoU ≥ `IOU_THRESHOLD`. A whole-image result is correct when the photo contains such a box.
 
 **Localization table:**
 - `median_iou`: per query, take the first found region in another photo that contains the object, and its IoU with that object's box; the median over all queries;

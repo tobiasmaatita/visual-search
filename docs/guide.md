@@ -241,13 +241,13 @@ Any other key (for example a future `"group"` for hard-negative groups) is kept 
             └──────┬───────┘
                    │ the mask becomes the query's prompt
                    ▼
-            ┌──────────────┐   DINOv2-small, one vector per image, cosine similarity
- STAGE 1    │  RETRIEVAL    │   query: the prompted region  ↔  gallery: WHOLE images
-            └──────┬───────┘   keeps top-100 (retrieval_k)
+            ┌──────────────┐   DINOv2-small descriptors, cosine similarity
+ STAGE 1    │  RETRIEVAL    │   query: the prompted region  ↔  gallery: its boxes (test set),
+            └──────┬───────┘   found regions (grounding) or whole images; keeps top-100 (retrieval_k)
                    │
                    ▼
             ┌──────────────┐   keypoints (SIFT / ALIKED / XFeat) + matching
- STAGE 2    │  SPARSE       │   query: keypoints INSIDE the mask  ↔  gallery: keypoints on the WHOLE image
+ STAGE 2    │  SPARSE       │   query: keypoints INSIDE the mask  ↔  gallery: inside its box / region (else whole image)
             │  VERIFICATION │   robust model fit (homography / affine / fundamental; MAGSAC++ or RANSAC)
             └──────┬───────┘   re-ranks the top-20 (top_k) by verified inliers; the rest keeps its order
                    │
@@ -318,7 +318,8 @@ The same `Cascade` object runs a single interactive query and a full evaluation,
 ### Caching: why the second run is fast
 
 Expensive work is stored in `cache/` (gitignored), keyed by the **image content** (a hash) plus the **model configuration**:
-- `cache/dinov2/<config>/…`: the DINOv2 CLS vector, the 32×32 grid of patch features and the image size, per image. Pooling modes and prompts can change without re-running the model.
+- `cache/dinov2/<config>/…`: the DINOv2 CLS vector, the 32×32 grid of patch features and the image size, per image. Pooling modes, prompts and grounding reuse these without re-running the model.
+- `cache/dinov2-crop/<config>/…`: the DINOv2 description of each *box crop* (test-set boxes and query crops), per image + box.
 - `cache/kp-<matcher>/<config>/…`: keypoints and descriptors per image, per matcher.
 
 Change the model, resolution or keypoint settings and a new cache folder is used automatically; stale results are never mixed in. Delete `cache/` at any time to start fresh. At 448 px the DINOv2 cache takes about 0.75 MB per image.

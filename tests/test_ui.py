@@ -122,6 +122,6 @@ def test_render_ranking_grid() -> None:
 
     png = render_ranking_grid(
         _img(40, 60), {"retrieval": [Candidate("a", 0.9, {"cosine": 0.9}), Candidate("b", 0.5)], "rerank": []},
-        load_thumb=lambda i: _img(30, 30), is_correct=lambda i: i == "a", k=3, label_of=lambda i: i,
+        load_thumb=lambda c: _img(30, 30), is_correct=lambda c: c.item_id == "a", k=3, label_of=lambda c: c.item_id,
     )
     assert png[:4] == b"\x89PNG"

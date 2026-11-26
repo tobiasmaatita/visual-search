@@ -18,6 +18,7 @@ across machines and usable as cache keys and split seeds.
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
 from collections.abc import Iterable
@@ -196,3 +197,46 @@ def load_mlcvtools_annotations(path: str | Path, image_root: str | Path) -> list
             }
         )
     return records
+
+
+def load_gallery(source: str | Path | Iterable[str | Path], recursive: bool = True) -> list[dict[str, Any]]:
+    """Build an unlabelled gallery from a directory, a glob pattern or a list of files.
+
+    Args:
+        source: One of
+            - a directory: all images in it (and its subfolders if ``recursive``);
+            - a glob pattern string, e.g. ``"photos/**/*.jpg"`` (``**`` matches subfolders);
+            - a list of image paths.
+        recursive: For a directory, also include subfolders.
+
+    Returns:
+        Records with ``label=None`` and no prompt, sorted by id. Ids are paths relative
+        to the directory for a directory source, else the paths as given.
+
+    Raises:
+        FileNotFoundError: If a listed file does not exist, or a directory/pattern
+            matches no images.
+
+    Example:
+        >>> gallery = parse_dataset(load_gallery("~/Pictures/showroom"))
+        >>> gallery = parse_dataset(load_gallery("data/**/*.png"))
+    """
+    if isinstance(source, (str, Path)) and Path(source).expanduser().is_dir():
+        root = Path(source).expanduser()
+        pattern = root.rglob("*") if recursive else root.iterdir()
+        paths = [p for p in pattern if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+                 and not p.name.startswith(".")]
+        records = [{"id": p.relative_to(root).as_posix(), "input_image": p, "label": None} for p in paths]
+    else:
+        if isinstance(source, (str, Path)):
+            matches = glob.glob(str(Path(source).expanduser()), recursive=True)
+            paths = [Path(m) for m in matches if Path(m).suffix.lower() in IMAGE_EXTENSIONS]
+        else:
+            paths = [Path(p).expanduser() for p in source]
+            missing = [str(p) for p in paths if not p.is_file()]
+            if missing:
+                raise FileNotFoundError(f"Gallery files not found: {missing[:5]}")
+        records = [{"id": str(p), "input_image": p, "label": None} for p in paths]
+    if not records:
+        raise FileNotFoundError(f"No images found for gallery source {source!r}.")
+    return sorted(records, key=lambda r: r["id"])

@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from visual_search.cache import FeatureCache, image_fingerprint
 from visual_search.cascade import RerankStage
-from visual_search.data.schema import Item
+from visual_search.data.schema import Item, Prompt
 from visual_search.geometry.verify import Method, ModelType, verify
 from visual_search.imaging import prompt_to_mask
 from visual_search.matching.base import Features, Matcher
@@ -23,7 +23,8 @@ class SparseVerificationStage(RerankStage):
     """Re-rank candidates by the number of geometrically verified matches.
 
     For each of the top-``top_k`` candidates: match local features (restricted to
-    the query mask and, if the gallery item has a prompt, its mask), fit a robust
+    the query mask and, on the gallery side, to the candidate's ``region`` if a
+    grounding retriever set one, else to the gallery item's prompt), fit a robust
     model and count inliers. The new score is ``inliers + stage-1 score``: the
     inlier count dominates and the previous score only breaks ties (it is in
     [-1, 1] for cosine retrieval). Candidates whose model fails or has fewer than
@@ -146,7 +147,9 @@ class SparseVerificationStage(RerankStage):
         for cand in candidates:
             item = gallery[cand.item_id]
             fc = self.features_for(item)
-            mask_c = prompt_to_mask(item.prompt, fc.image_hw) if self.use_masks else None
+            # A grounded candidate carries the region where the object was found; match only there.
+            region_prompt = Prompt(box=cand.region) if cand.region is not None else item.prompt
+            mask_c = prompt_to_mask(region_prompt, fc.image_hw) if self.use_masks else None
             corr = self.matcher.match_extracted(fq, fc, mask_q, mask_c)
             ver = verify(corr, self.model_type, self.method, self.threshold)
             n_inl = ver.n_inliers if ver.ok and ver.n_inliers >= self.min_inliers else 0
@@ -161,5 +164,5 @@ class SparseVerificationStage(RerankStage):
             artifacts = ({"correspondences": corr, "verification": ver, "accepted": n_inl > 0}
                          if self.keep_artifacts else {})
             out.append(Candidate(cand.item_id, n_inl + cand.score, {**cand.features, **features},
-                                 {**cand.artifacts, **artifacts}))
+                                 {**cand.artifacts, **artifacts}, region=cand.region))
         return sorted(out, key=lambda c: -c.score)

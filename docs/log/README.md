@@ -2,6 +2,7 @@
 
 Newest first. One entry per significant change; see CLAUDE.md for the rules.
 
+- 2026-11-26: [Gallery grounding with DINOv2 and new-gallery search (step 6c, part 3)](2026-11-26-03-gallery-grounding.md)
 - 2026-11-26: [Search and evaluate on the labelled test set (step 6c, part 2)](2026-11-26-02-testset-search.md)
 - 2026-11-26: [Per-object annotations and a labeling notebook (step 6c, part 1)](2026-11-26-01-labeling-notebook.md)
 - 2026-11-24: [Learned sparse matchers: ALIKED + LightGlue, XFeat + LighterGlue](2026-11-24-08-learned-sparse-matchers.md)

@@ -97,7 +97,7 @@ def test_search_app_on_testset(items: list, tmp_path: Path) -> None:
     gallery = {it.item_id: it for it in items}
     assert gallery[ids[0]].label == q.label  # SIFT verification puts the same object first
     assert "expected label: syn_00" in app.info.value
-    assert app._thumb(ids[0]).shape[0] <= 256  # box thumbnail
+    assert app._thumb(res.final[0]).shape[0] <= 256  # box thumbnail
 
     # A new image: correctness only when an expected label is given.
     path = tmp_path / "new.png"

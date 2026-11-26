@@ -1,6 +1,6 @@
 # Repository guide
 
-This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c part 2 (search and evaluation on your labelled test set). The step-by-step history, with measurements, is in the [change log](log/README.md).
+This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c (the labeling notebook, search on your labelled test set, and gallery grounding for unlabelled photo collections). The step-by-step history, with measurements, is in the [change log](log/README.md).
 
 **Contents**
 
@@ -264,20 +264,35 @@ DINOv2 is **not** an object detector here. It produces a description vector, not
 
 ### What exactly is compared: boxes or whole images?
 
-It depends on what the gallery items carry:
+It depends on what the gallery items carry and which stage-1 retriever is used:
 
-| | Query side | Gallery item **with a box** (your labelled test set) | Gallery item **without a box** (a folder of photos) |
-|---|---|---|---|
-| **Stage 1 (DINOv2)** | Only the prompted region. The default `crop_cls` mode crops to the prompt box (plus 10 % padding). | Only the box: the gallery box is cropped and described the same way. | **The whole image**: one description per photo. |
-| **Stage 2 (keypoints)** | Only keypoints **inside the mask** (the box, or later the SAM3 mask). | Only keypoints inside the gallery box. | **All keypoints of the whole image.** |
+| | Query side | Gallery item **with a box** (labelled test set) | Photo **without a box**, grounded (`GroundedDinoRetriever`, notebook section 7) | Photo **without a box**, not grounded (`DinoRetriever`) |
+|---|---|---|---|---|
+| **Stage 1 (DINOv2)** | Only the prompted region. `crop_cls` crops to the prompt box (plus 10 % padding); grounding averages the patch features under it. | Only the box. | **The regions where the object was found:** up to 3 per photo, each its own result. | The whole image. |
+| **Stage 2 (keypoints)** | Only keypoints **inside the mask** (the box, or later the SAM3 mask). | Only keypoints inside the box. | Only keypoints inside the found region. | All keypoints of the whole image. |
 
-**When searching your labelled test set, both stages compare object to object.** Each annotated box is its own gallery entry.
+**Your labelled test set compares object to object.** Each annotated box is its own gallery entry.
 
-**For unlabelled photos, we search with an object against whole scenes.** That works well when gallery photos show one dominant object (product shots). It is weaker for cluttered rooms: the background takes part in the semantic comparison, and stage 2 can pick up matches with other furniture. Both real-data failures seen so far come from this (see the [step 6a log](log/2026-11-24-07-sparse-verification-sift.md) and the [step 6b log](log/2026-11-24-08-learned-sparse-matchers.md)).
+**An unlabelled photo collection compares object to object too, with grounding.** Without it, an object is compared against whole scenes, which works for product shots but not for cluttered rooms. Both early real-data failures came from that (see the [step 6a log](log/2026-11-24-07-sparse-verification-sift.md) and the [step 6b log](log/2026-11-24-08-learned-sparse-matchers.md)).
 
-The fix for unlabelled galleries is **gallery grounding**: find the object in each gallery photo, so both stages compare object to object there too.
-- **Decided approach:** localize with DINOv2. The query's features are compared with the gallery photo's cached patch features (about 1 ms per photo), and each found region becomes its own result.
-- **Status:** it comes with the "Search a new gallery" section (step 6c, part 3); see [section 10](#10-known-limitations-and-what-comes-next).
+### Gallery grounding: finding the object in each photo
+
+`GroundedDinoRetriever` ([`retrieval/grounding.py`](../src/visual_search/retrieval/grounding.py)) needs no extra model and no labels:
+
+1. **Query descriptor.** The query's DINOv2 patch features under your box are averaged into one vector.
+2. **Similarity map.** That vector is compared with every patch of every gallery photo. Each photo has a 32×32 patch grid, cached from stage 1, so this is one matrix product.
+3. **Regions.**
+   - In each photo, the patches within `delta` (0.1) of the photo's best similarity are switched on, and connected blobs become regions (boxes, plus one patch of context).
+   - Up to `max_regions` (3) blobs are kept if their peak is close to the best one (`region_delta`, 0.1).
+4. **Scoring.** Each region is scored by the cosine between the query vector and the region's average feature, so a photo can appear more than once (one result per region).
+5. **Stage 2** matches keypoints only inside the region.
+
+Measurements so far:
+- **Speed:** about 4 ms per query for a handful of photos and about 26 ms for 70 photos on an M2, warm.
+- **Memory:** all patch grids are kept in RAM, about 0.75 MB per photo.
+- **Localization:** on the synthetic set, the best correct region overlaps the true object box with a median IoU of 0.66 (73 % above 0.5).
+
+Grounding is *semantic*: it finds regions that *look like* your object (e.g. a dark-grey armchair for a dark-grey sofa). Confirming that a region is the same physical item is stage 2's job.
 
 ### What happens under the hood, step by step
 
@@ -357,7 +372,13 @@ In both, every code cell is preceded by a markdown cell explaining what it does.
    - Right: the gallery image warped onto the query with the fitted homography. If the object is really the same, the warped outline (orange) sits on the object.
    - Matches the stage rejected (too few inliers) are labelled *REJECTED* and get no warp panel.
 
-**7. Search a new gallery.** Coming in step 6c, part 3. You'll give a folder, glob or file list, draw a box on a query, and get the top-n regions where the object appears (no labels needed, no ✓/✗).
+**7. Search a new gallery.** Search any collection of photos, with no labels needed.
+1. **Choose the gallery.** Set `GALLERY_SOURCE` to a folder (all images, including subfolders), a glob pattern (`"/path/**/*.jpg"`) or a list of file paths, and `TOP_N` to the number of results.
+2. **Build the app.** The cascade is `GroundedDinoRetriever` → SIFT verification of the top `max(SPARSE_K, TOP_N)` regions.
+3. **Query.** Load a query by path (or pick a test-set box), draw a box and press **Search**.
+4. **Read the results.** Each result is a crop around the **found region** (yellow box). There is no *Expected* field and no ✓/✗: you judge the results. **Detail** shows the keypoint matches inside the region.
+
+After a search, `gallery_app.last_result` holds every candidate with its `region`.
 
 After a search, `testset_app.last_result` holds all rankings and score components, and `testset_app.timings` the step timings.
 
@@ -392,7 +413,7 @@ Every thumbnail title reads, for example, `#1 41.623 ✓`, then the label, then 
 
 - **`#1`:** the rank in that stage.
 - **The score:** its meaning depends on the stage.
-  - Retrieval row: the **cosine similarity** between the query and gallery descriptions, from −1 to 1. In practice about 0.3 (unrelated) to above 0.8 (very similar).
+  - Retrieval row: the **cosine similarity** between the query and gallery descriptions, from −1 to 1. In practice about 0.3 (unrelated) to above 0.8 (very similar). With grounding (section 7) it compares the query with a found **region**, and the crop shows that region.
   - Sparse-stage row: **`inliers + cosine`**. `41.623` means 41 verified inliers plus a cosine of 0.623. A score below 1 means the geometric check failed (0 inliers) and only the cosine is left.
 - **✓ / ✗** (green / red frame): whether the result has the query's label. Only shown when the query is labelled.
 - **Score components** (stored in `candidate.features`):
@@ -405,6 +426,8 @@ Every thumbnail title reads, for example, `#1 41.623 ✓`, then the label, then 
 | `matches` | stage 2 | Tentative matches before the geometric check. |
 | `residual_px` | stage 2 | Mean distance in pixels between where an inlier lands and where the model predicts it. Lower = tighter fit. |
 | `stage1` | stage 2 | The candidate's score from the previous stage. |
+| `peak` | grounding | The best single-patch similarity inside the region. |
+| `region_patches` | grounding | How many patches (of the 32×32 grid) the region's blob covers. |
 
 Inlier counts depend strongly on texture: a patterned cushion gives many, a plain upholstered sofa few. That is why step 7 adds more components (spatial coverage of the mask, mask overlap after warping, post-warp appearance difference, warp distortion) and a combiner, instead of relying on inliers alone.
 
@@ -433,6 +456,7 @@ The code separates **models** (neural networks that produce features or masks) f
 | `DinoRetriever(pooling="crop_cls")` | DINOv2 CLS token of the query **cropped to its prompt** | **Default**, the best stage-1 mode so far. One extra model run per query. |
 | `DinoRetriever(pooling="masked_mean")` | Average of DINOv2 patch features **under the prompt**, from the full-image pass | Instant when the prompt changes (no extra model run). Weaker than `crop_cls` on synthetic data. Benefits most from real SAM3 masks. |
 | `DinoRetriever(pooling="cls")` | CLS token of the whole query image | Ablation: ignores the prompt. |
+| `GroundedDinoRetriever` | Finds the query object inside each gallery photo (DINOv2 patch similarity) and ranks the **regions** (up to 3 per photo) | For unlabelled photo collections (notebook section 7). Results carry a `region` box. |
 
 ### Maskers (`masking/`)
 
@@ -546,7 +570,7 @@ Use `timing.StageTimer` and `cache.FeatureCache` for consistent timings and cach
 ```
 src/visual_search/
   data/         schema.py    Item, Prompt, is_match: the dataset format
-                folder.py    folder-per-object loader, distractor folders, mlcvtools importer
+                folder.py    folder-per-object loader, load_gallery (folder / glob / list), mlcvtools importer
                 split.py     validator + seeded query/gallery split
                 synthetic.py SMOKE-TEST-ONLY generated data
   models/       dinov2.py    DINOv2 backbone (CLS + patch features)
@@ -554,6 +578,7 @@ src/visual_search/
                 index.py     exact cosine search
                 dino.py      DinoRetriever (cls / crop_cls / masked_mean)
                 baselines.py random, color histogram
+                grounding.py GroundedDinoRetriever, localize (find the object in each photo)
   masking/      base.py      Masker, NoMasker, BoxMasker, with_mask
                 sam3.py      SAM3 ONNX adapter (untested on the real model)
   matching/     base.py      Matcher, Features, Correspondences
@@ -587,14 +612,14 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 ## 10. Known limitations and what comes next
 
 **Current limitations.**
-- **Unlabelled galleries are compared as whole images** (see [section 4](#4-how-a-search-works-the-pipeline)). This is the main weakness for cluttered scenes; the labelled test set already compares box to box.
+- **Grounding is coarse and semantic.** Regions sit on a 32×32 patch grid, and they find what *looks like* the object (a similar armchair for a sofa). Stage 2 still has to confirm the exact item. The thresholds (`delta`, `region_delta`) were tuned on synthetic data only.
 - **Masks are boxes.** SAM3 masks are wired in but unvalidated.
 - **Stage 2 scores by inlier count only,** which gave one false verification on real data (ALIKED on a room photo) and favors textured objects.
 - **The real dataset is too small to measure anything yet** (one query). Also, `bank_01` holds two *different* sofas of the same model, so it currently measures model-level rather than instance-level matching (see [Exact item or same model?](#exact-item-or-same-model)).
 - **Latency was measured on an 8 GB M2 development machine,** not on the target 16 GB Mac or the GPU server.
 
 **Next steps.**
-1. **Step 6c, part 3: gallery grounding and "Search a new gallery":** DINOv2 localization finds the object in each photo of an unlabelled folder; results are per region, top-n.
+1. **An evaluation notebook:** compare approaches on your test set. It will cover metrics per `group` (model level next to item level), grounding judged against your annotated boxes (does the found region overlap the right box?), and possibly a reorganization into labeling, free-play and evaluation notebooks.
 2. **Step 7, scoring:** spatial coverage of the query mask, mask overlap after warping, post-warp appearance difference, reprojection error and warp distortion, combined first with hand-set weights and later with weights learned from labelled data.
 3. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5, plus a displacement map in the detail view.
 4. **Step 9, full ablations** on real data and on target hardware.

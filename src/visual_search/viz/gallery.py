@@ -72,13 +72,14 @@ def _feature_text(c: Candidate, max_features: int) -> str:
 def render_ranking_grid(
     query_image: NDArray[np.uint8],
     stages: Mapping[str, list[Candidate]],
-    load_thumb: Callable[[str], NDArray[np.uint8]],
-    is_correct: Callable[[str], bool | None],
+    load_thumb: Callable[[Candidate], NDArray[np.uint8]],
+    is_correct: Callable[[Candidate], bool | None],
     k: int = 5,
-    label_of: Callable[[str], str | None] | None = None,
+    label_of: Callable[[Candidate], str | None] | None = None,
     max_features: int = 2,
     title: str = "",
     cell_inches: float = 2.0,
+    per_row: int = 8,
 ) -> bytes:
     """Render one row per stage: the query, then its top-``k`` candidates.
 
@@ -88,46 +89,53 @@ def render_ranking_grid(
     Args:
         query_image: Query image to show at the start of each row (e.g. with mask overlay).
         stages: Stage name -> ranking (best first), e.g. ``QueryResult.stages``.
-        load_thumb: Item id -> RGB thumbnail.
-        is_correct: Item id -> True/False, or None when ground truth is unknown.
-        k: Candidates per row.
-        label_of: Optional item id -> label, shown under the thumbnail.
+        load_thumb: Candidate -> RGB thumbnail (the candidate's ``region`` may matter).
+        is_correct: Candidate -> True/False, or None when ground truth is unknown.
+        k: Candidates shown per stage.
+        label_of: Optional candidate -> label, shown under the thumbnail.
         max_features: Number of score features printed per candidate.
         title: Figure title (e.g. timings).
         cell_inches: Size of one cell.
+        per_row: Candidates per grid row; a stage with more than this wraps onto extra rows.
 
     Returns:
         PNG bytes (render with ``ipywidgets.Image`` or ``IPython.display.Image``).
     """
-    names = list(stages)
-    n_rows, n_cols = max(len(names), 1), k + 1
+    names = list(stages) or [""]
+    cols = min(k, per_row)
+    rows_per_stage = max(1, -(-k // per_row))
+    n_rows, n_cols = len(names) * rows_per_stage, cols + 1
     fig = Figure(figsize=(cell_inches * n_cols, (cell_inches + 0.6) * n_rows))
     axes = fig.subplots(n_rows, n_cols, squeeze=False)
     query_thumb = thumbnail(query_image)
-    for r, name in enumerate(names or [""]):
-        ax = axes[r, 0]
-        ax.imshow(query_thumb)
-        ax.set_title(f"query\n[{name}]", fontsize=9)
-        ax.set_axis_off()
-        ranking = stages.get(name, []) if names else []
-        for c in range(1, n_cols):
-            ax = axes[r, c]
+    for s_idx, name in enumerate(names):
+        ranking = stages.get(name, []) if name else []
+        for sub in range(rows_per_stage):
+            r = s_idx * rows_per_stage + sub
+            ax = axes[r, 0]
             ax.set_axis_off()
-            if c - 1 >= len(ranking):
-                continue
-            cand = ranking[c - 1]
-            thumb = load_thumb(cand.item_id)
-            ax.imshow(thumb)
-            correct = is_correct(cand.item_id)
-            mark = "" if correct is None else (" ✓" if correct else " ✗")
-            label = label_of(cand.item_id) if label_of else None
-            lines = [f"#{c} {cand.score:.3f}{mark}", label or "", _feature_text(cand, max_features)]
-            ax.set_title("\n".join(x for x in lines if x), fontsize=8,
-                         color="black" if correct is None else (CORRECT_COLOR if correct else WRONG_COLOR))
-            if correct is not None:
-                h, w = thumb.shape[:2]
-                ax.add_patch(Rectangle((-0.5, -0.5), w, h, fill=False, linewidth=4,
-                                       edgecolor=CORRECT_COLOR if correct else WRONG_COLOR))
+            if sub == 0:
+                ax.imshow(query_thumb)
+                ax.set_title(f"query\n[{name}]", fontsize=9)
+            for c in range(1, n_cols):
+                ax = axes[r, c]
+                ax.set_axis_off()
+                rank = sub * cols + c - 1
+                if rank >= min(k, len(ranking)):
+                    continue
+                cand = ranking[rank]
+                thumb = load_thumb(cand)
+                ax.imshow(thumb)
+                correct = is_correct(cand)
+                mark = "" if correct is None else (" ✓" if correct else " ✗")
+                label = label_of(cand) if label_of else None
+                lines = [f"#{rank + 1} {cand.score:.3f}{mark}", label or "", _feature_text(cand, max_features)]
+                ax.set_title("\n".join(x for x in lines if x), fontsize=8,
+                             color="black" if correct is None else (CORRECT_COLOR if correct else WRONG_COLOR))
+                if correct is not None:
+                    h, w = thumb.shape[:2]
+                    ax.add_patch(Rectangle((-0.5, -0.5), w, h, fill=False, linewidth=4,
+                                           edgecolor=CORRECT_COLOR if correct else WRONG_COLOR))
     if title:
         fig.suptitle(title, fontsize=10)
     fig.tight_layout()

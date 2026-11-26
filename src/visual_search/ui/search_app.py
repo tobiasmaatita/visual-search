@@ -24,6 +24,7 @@ from visual_search.cascade import Cascade, QueryResult
 from visual_search.data.schema import Item, Prompt, is_match
 from visual_search.imaging import prompt_to_mask
 from visual_search.masking.base import BoxMasker, Masker, MaskResult, with_mask
+from visual_search.retrieval.base import Candidate
 from visual_search.ui.prompt_widget import PromptWidget
 from visual_search.viz.gallery import box_thumbnail, render_ranking_grid, thumbnail
 from visual_search.viz.overlay import overlay_mask
@@ -81,7 +82,7 @@ class SearchApp:
         self.masker = masker or BoxMasker()
         self.top_k = top_k
         self.thumb_size = thumb_size
-        self._thumbs: dict[str, NDArray[np.uint8]] = {}
+        self._thumbs: dict[tuple, NDArray[np.uint8]] = {}
         self.query: Item | None = None
         self._image: NDArray[np.uint8] | None = None
         self._image_key: str | None = None
@@ -208,10 +209,11 @@ class SearchApp:
         item = self.gallery[cand.item_id]
         image_c = item.load_image()
         feats = ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in cand.features.items())
+        region = Prompt(box=cand.region) if cand.region is not None else item.prompt
         self.detail.value = render_pair_detail(
             self._image, image_c, corr, cand.artifacts.get("verification"),
             mask_q=prompt_to_mask(self._query_item.prompt, self._image.shape[:2]),
-            mask_c=prompt_to_mask(item.prompt, image_c.shape[:2]),
+            mask_c=prompt_to_mask(region, image_c.shape[:2]),
             title=f"#{rank + 1} {cand.item_id} (label {item.label}) | {feats}",
             accepted=bool(cand.artifacts.get("accepted", True)),
         )
@@ -226,7 +228,10 @@ class SearchApp:
         """Offer the final top-k candidates in the detail dropdown."""
         self._reset_detail()
         self.detail_select.options = [
-            (f"#{i + 1} {c.item_id} ({self.gallery[c.item_id].label}) score {c.score:.3f}", i)
+            (f"#{i + 1} {c.item_id}"
+             + (f" region ({', '.join(f'{v:.0f}' for v in c.region)})" if c.region is not None else "")
+             + (f" ({self.gallery[c.item_id].label})" if self.gallery[c.item_id].label else "")
+             + f" score {c.score:.3f}", i)
             for i, c in enumerate(result.final[: self.top_k])
         ]
 
@@ -257,16 +262,17 @@ class SearchApp:
             + (f" [{detail}]" if detail else "")
         )
 
-    def _thumb(self, item_id: str) -> NDArray[np.uint8]:
-        """Return (and memoize) a gallery thumbnail."""
-        if item_id not in self._thumbs:
-            item = self.gallery[item_id]
+    def _thumb(self, cand: Candidate) -> NDArray[np.uint8]:
+        """Return (and memoize) a thumbnail: a crop around the found region or the item's box, else the image."""
+        key = (cand.item_id, cand.region)
+        if key not in self._thumbs:
+            item = self.gallery[cand.item_id]
             image = item.load_image()
-            if item.prompt is not None and item.prompt.mask is None:
-                self._thumbs[item_id] = box_thumbnail(image, item.prompt.bbox(), max_side=self.thumb_size)
-            else:
-                self._thumbs[item_id] = thumbnail(image, self.thumb_size)
-        return self._thumbs[item_id]
+            box = cand.region if cand.region is not None else (
+                item.prompt.bbox() if item.prompt is not None and item.prompt.mask is None else None)
+            self._thumbs[key] = (box_thumbnail(image, box, max_side=self.thumb_size) if box is not None
+                                 else thumbnail(image, self.thumb_size))
+        return self._thumbs[key]
 
     def _render(self, result: QueryResult, item: Item) -> None:
         """Draw the per-stage gallery and the timing line."""
@@ -276,14 +282,14 @@ class SearchApp:
             query_vis = overlay_mask(self._image, item.prompt.mask)
         labelled = item.label is not None
 
-        def correct(item_id: str) -> bool | None:
-            return is_match(item, self.gallery[item_id]) if labelled else None
+        def correct(cand: Candidate) -> bool | None:
+            return is_match(item, self.gallery[cand.item_id]) if labelled else None
 
         timing = " | ".join(f"{k} {v * 1000:.0f} ms" for k, v in self.timings.items())
         total = sum(self.timings.values()) * 1000
         self.results.value = render_ranking_grid(
             query_vis, result.stages, self._thumb, correct, k=self.top_k,
-            label_of=lambda i: self.gallery[i].label, title=f"{item.item_id}: {timing} | total {total:.0f} ms",
+            label_of=lambda c: self.gallery[c.item_id].label, title=f"{item.item_id}: {timing} | total {total:.0f} ms",
         )
         expected = f"expected label: {html.escape(item.label)}" if labelled else "no expected label (no ✓/✗)"
         self.info.value = (f"Query <b>{html.escape(item.item_id)}</b> ({expected})"

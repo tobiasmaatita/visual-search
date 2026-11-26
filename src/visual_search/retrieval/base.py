@@ -25,12 +25,17 @@ class Candidate:
             filled by later stages for inspection and learned combiners.
         artifacts: Non-numeric by-products for inspection (correspondences, fitted
             models), e.g. for the pair detail view. Not used for ranking.
+        region: Where in the gallery image the object was found, ``(x0, y0, x1, y1)``
+            pixels, when a grounding retriever localized it; ``None`` = the item as is
+            (its own box, or the whole image). One image can yield several candidates
+            with different regions.
     """
 
     item_id: str
     score: float
     features: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[str, Any] = field(default_factory=dict, repr=False)
+    region: tuple[float, float, float, float] | None = None
 
 
 class Retriever(ABC):

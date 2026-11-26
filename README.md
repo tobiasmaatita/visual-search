@@ -15,7 +15,7 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+. [mlcvtools](../mlcvt
 
 ```bash
 uv sync --extra onnx --extra sparse   # base + dev + SAM3 runtime + learned matchers (kornia)
-uv run pytest                         # run the tests
+uv run --all-extras pytest            # run the tests (keep the extras installed)
 uv run ruff check src tests
 ```
 
@@ -27,7 +27,7 @@ uv run ruff check src tests
 JupyterLab is a dev dependency, so after `uv sync`:
 
 ```bash
-uv run jupyter lab
+uv run --all-extras jupyter lab
 ```
 
 Open a notebook from `notebooks/`. The default "Python 3" kernel is the project's `.venv`. The interactive widgets use ipympl (`%matplotlib widget`), which is included in the dependencies.
@@ -99,6 +99,6 @@ uv sync --extra onnx
 uv run python scripts/try_sam3.py data/bank_01/img-001.png --box 63 335 535 568
 ```
 
-A plain `uv sync` without the extras uninstalls onnxruntime and kornia again. The learned matchers (`aliked-lightglue`, `xfeat-lighterglue`) download their weights (about 67 MB) to `~/.cache/torch/hub/checkpoints` on first use.
+**Keep the extras:** a plain `uv sync` *or* `uv run …` without `--all-extras` (or `--extra …`) uninstalls onnxruntime and kornia again. The learned-matcher tests are then skipped, and SAM3 and the learned matchers can't load. The learned matchers (`aliked-lightglue`, `xfeat-lighterglue`) download their weights (about 67 MB) to `~/.cache/torch/hub/checkpoints` on first use.
 
 DINOv2 is loaded with PyTorch from Hugging Face (`facebook/dinov2-small` by default; it's downloaded on first use). Extracted features are cached in `cache/` (gitignored), keyed by image content and model configuration. See [docs/log/2026-11-24-01-latency-budget-and-rejections.md](docs/log/2026-11-24-01-latency-budget-and-rejections.md) for which model variants are in or out, and why.

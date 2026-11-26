@@ -45,7 +45,7 @@ uv sync --extra onnx --extra sparse
 - **`--extra onnx`** adds onnxruntime, which the SAM3 adapter needs.
 - **`--extra sparse`** adds kornia, which the learned matchers (ALIKED, XFeat) need.
 
-A plain `uv sync` without the extras *removes* onnxruntime and kornia again, so always pass the extras you use.
+**Keep the extras installed:** a plain `uv sync` *or* `uv run …` without extras *removes* onnxruntime and kornia again. So run commands as `uv run --all-extras …` (as below), or pass the extras you use.
 
 Model weights are downloaded on first use:
 - **DINOv2:** from Hugging Face into `~/.cache/huggingface`.
@@ -56,7 +56,7 @@ The SAM3 and RF-DETR ONNX files are not downloaded; they live in `models/` (giti
 ### Run the notebook
 
 ```bash
-uv run jupyter lab
+uv run --all-extras jupyter lab
 ```
 
 Open one of the three notebooks in `notebooks/` and choose *Run → Run All Cells*:
@@ -100,7 +100,7 @@ result = cascade.run(query, exclude={query.item_id})   # one query
 ### Run the tests
 
 ```bash
-uv run pytest
+uv run --all-extras pytest
 ```
 
 Tests that need the learned-matcher weights are skipped if those weights aren't downloaded.

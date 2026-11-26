@@ -14,7 +14,8 @@ mean of all patches for ``"masked_mean"``); gallery items *with* a prompt get th
 same treatment as queries.
 
 Full-image features (CLS + float16 patch grid + original size) are cached on disk
-per image content and backbone configuration.
+per image content and backbone configuration; ``crop_cls`` descriptors of boxed
+items (query crops, annotated gallery boxes) are cached per image + box.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import Any, Literal, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from visual_search.cache import FeatureCache, image_fingerprint
+from visual_search.cache import FeatureCache, config_hash, image_fingerprint
 from visual_search.data.schema import Item
 from visual_search.imaging import crop_to_prompt, prompt_patch_mask
 from visual_search.retrieval.base import EmbeddingRetriever
@@ -92,6 +93,18 @@ class DinoRetriever(EmbeddingRetriever):
         model = str(backbone.identity.get("model_id", "dino")).split("/")[-1]
         self.name = f"{model}/{pooling}"
         self.n_forward = 0  # images actually run through the backbone (for cache diagnostics)
+        crop_cfg = {**cache_cfg, "crop_pad": crop_pad}
+        self.crop_cache = FeatureCache(cache_dir, "dinov2-crop", crop_cfg) if cache_dir is not None else None
+        self._fp_memo: dict[str, str] = {}
+
+    def _fingerprint(self, item: Item) -> str:
+        """Content hash of an item's image; file paths are hashed once per retriever."""
+        if isinstance(item.image, (str, Path)):
+            key = str(item.image)
+            if key not in self._fp_memo:
+                self._fp_memo[key] = image_fingerprint(item.image)
+            return self._fp_memo[key]
+        return image_fingerprint(item.image)
 
     def image_features(self, items: Sequence[Item]) -> list[dict[str, NDArray]]:
         """Return full-image features per item, using the cache where possible.
@@ -103,7 +116,7 @@ class DinoRetriever(EmbeddingRetriever):
             Per item: ``{"cls": (D,) float32, "patches": (g, g, D) float16, "hw": (2,) int}``.
         """
         out: list[dict[str, NDArray] | None] = [None] * len(items)
-        fps = [image_fingerprint(it.image) for it in items] if self.cache is not None else [None] * len(items)
+        fps = [self._fingerprint(it) for it in items] if self.cache is not None else [None] * len(items)
         todo = []
         for i, fp in enumerate(fps):
             hit = self.cache.get(fp) if self.cache is not None and fp is not None else None
@@ -123,6 +136,42 @@ class DinoRetriever(EmbeddingRetriever):
                 out[i] = feats
         return out  # type: ignore[return-value]
 
+    def crop_descriptors(self, items: Sequence[Item]) -> list[NDArray[np.float32]]:
+        """CLS descriptors of items cropped to their (padded) prompt box, batched and cached.
+
+        The cache key is the image content plus the prompt's box, so a gallery of
+        annotated boxes is embedded once, and a repeated query crop is free.
+
+        Args:
+            items: Items with a prompt (items without one are cropped to the whole image).
+
+        Returns:
+            ``(D,)`` float32 descriptor per item.
+        """
+        out: list[NDArray[np.float32] | None] = [None] * len(items)
+        keys: list[str | None] = [None] * len(items)
+        todo = []
+        for i, it in enumerate(items):
+            if self.crop_cache is not None:
+                box = it.prompt.bbox() if it.prompt is not None else None
+                keys[i] = config_hash({"fp": self._fingerprint(it), "box": box and [round(v, 1) for v in box]})
+                hit = self.crop_cache.get(keys[i])
+                if hit is not None:
+                    out[i] = hit["cls"]
+                    continue
+            todo.append(i)
+        for start in range(0, len(todo), self.batch_size):
+            idx = todo[start : start + self.batch_size]
+            crops = [np.ascontiguousarray(crop_to_prompt(items[i].load_image(), items[i].prompt, pad=self.crop_pad))
+                     for i in idx]
+            cls, _ = self.backbone.extract(crops)
+            self.n_forward += len(idx)
+            for j, i in enumerate(idx):
+                out[i] = cls[j].astype(np.float32)
+                if self.crop_cache is not None and keys[i] is not None:
+                    self.crop_cache.put(keys[i], {"cls": out[i]})
+        return out  # type: ignore[return-value]
+
     def describe(self, item: Item, feats: dict[str, NDArray] | None = None) -> NDArray[np.float32]:
         """Compute the pooled descriptor of one item, honoring its prompt.
 
@@ -134,9 +183,7 @@ class DinoRetriever(EmbeddingRetriever):
             ``(D,)`` float32 descriptor (not normalized).
         """
         if self.pooling == "crop_cls" and item.prompt is not None:
-            crop = np.ascontiguousarray(crop_to_prompt(item.load_image(), item.prompt, pad=self.crop_pad))
-            self.n_forward += 1
-            return self.backbone.extract([crop])[0][0]
+            return self.crop_descriptors([item])[0]
         feats = feats if feats is not None else self.image_features([item])[0]
         if self.pooling in ("cls", "crop_cls"):
             return feats["cls"].astype(np.float32)
@@ -167,5 +214,12 @@ class DinoRetriever(EmbeddingRetriever):
         """
         if not items:
             return np.zeros((0, self.backbone.dim), np.float32)
-        feats = self.image_features(items)
-        return np.stack([self.describe(it, f) for it, f in zip(items, feats)])
+        out: list[NDArray[np.float32] | None] = [None] * len(items)
+        if self.pooling == "crop_cls":
+            boxed = [i for i, it in enumerate(items) if it.prompt is not None]
+            for i, d in zip(boxed, self.crop_descriptors([items[i] for i in boxed])):
+                out[i] = d
+        rest = [i for i in range(len(items)) if out[i] is None]
+        for i, f in zip(rest, self.image_features([items[i] for i in rest])):
+            out[i] = self.describe(items[i], f)
+        return np.stack(out)  # type: ignore[arg-type]

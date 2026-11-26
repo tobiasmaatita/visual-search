@@ -34,6 +34,34 @@ def thumbnail(image: NDArray[np.uint8], max_side: int = 256) -> NDArray[np.uint8
     return cv2.resize(image, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
 
 
+def box_thumbnail(
+    image: NDArray[np.uint8], box: tuple[float, float, float, float], pad: float = 0.3, max_side: int = 256
+) -> NDArray[np.uint8]:
+    """Crop around a box (with context), draw the box, and downscale.
+
+    Small objects in large photos stay recognizable, while the context shows
+    where they are.
+
+    Args:
+        image: ``(H, W, 3)`` uint8 RGB.
+        box: ``(x0, y0, x1, y1)`` in pixels.
+        pad: Context added on each side, as a fraction of the box size.
+        max_side: Longer side of the result in pixels.
+
+    Returns:
+        The thumbnail.
+    """
+    h, w = image.shape[:2]
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    cx0, cy0 = int(max(0, x0 - pad * bw)), int(max(0, y0 - pad * bh))
+    cx1, cy1 = int(min(w, x1 + pad * bw)), int(min(h, y1 + pad * bh))
+    crop = np.ascontiguousarray(image[cy0 : max(cy1, cy0 + 1), cx0 : max(cx1, cx0 + 1)])
+    t = max(2, round(max(crop.shape[:2]) / 120))
+    cv2.rectangle(crop, (int(x0 - cx0), int(y0 - cy0)), (int(x1 - cx0), int(y1 - cy0)), (255, 220, 0), t)
+    return thumbnail(crop, max_side)
+
+
 def _feature_text(c: Candidate, max_features: int) -> str:
     """Format the main score features of a candidate (numbers only)."""
     parts = [f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}" for k, v in list(c.features.items())[:max_features]

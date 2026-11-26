@@ -8,7 +8,7 @@ The same :class:`Cascade` object serves interactive single queries
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from visual_search.data.schema import Item
@@ -152,11 +152,13 @@ class Cascade:
         self._gallery = {it.item_id: it for it in gallery}
         return timer.timings
 
-    def run(self, query: Item) -> QueryResult:
+    def run(self, query: Item, exclude: Collection[str] = ()) -> QueryResult:
         """Run the full cascade for one query.
 
         Args:
             query: The query item (its prompt focuses retrieval and matching).
+            exclude: Gallery item ids to leave out of the results, e.g. the query's own
+                entry when the query was picked from the gallery.
 
         Returns:
             Rankings after each stage and per-stage timings.
@@ -169,7 +171,9 @@ class Cascade:
         timer = StageTimer(sync=self.sync)
         result = QueryResult(query.item_id)
         with timer.stage(RETRIEVAL_STAGE):
-            ranking = self.retriever.search(query, self.retrieval_k)
+            ranking = self.retriever.search(query, self.retrieval_k + len(exclude))
+            if exclude:
+                ranking = [c for c in ranking if c.item_id not in exclude][: self.retrieval_k]
         result.stages[RETRIEVAL_STAGE] = ranking
         for st in self.stages:
             head, tail = ranking[: st.top_k], ranking[st.top_k :]

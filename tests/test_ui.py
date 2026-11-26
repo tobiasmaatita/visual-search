@@ -114,7 +114,7 @@ def test_search_app_path_query_and_drawn_box(split, tmp_path) -> None:
     _drag(app.prompt_widget, (5, 5), (40, 30))
     assert app.mask_result.mask[10, 10] and not app.mask_result.mask[50, 80]
     result = app.search()
-    assert result.final and "✓" not in app.info.value
+    assert result.final and "no expected label" in app.info.value
 
 
 def test_render_ranking_grid() -> None:

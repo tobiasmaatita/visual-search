@@ -1,6 +1,6 @@
 # Repository guide
 
-This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c part 1 (the labeling notebook). The step-by-step history, with measurements, is in the [change log](log/README.md).
+This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c part 2 (search and evaluation on your labelled test set). The step-by-step history, with measurements, is in the [change log](log/README.md).
 
 **Contents**
 
@@ -8,7 +8,7 @@ This guide explains what the code in this repository does and how to use it. It 
 2. [Getting started](#2-getting-started)
 3. [Your data: what to provide and what to label](#3-your-data-what-to-provide-and-what-to-label)
 4. [How a search works: the pipeline](#4-how-a-search-works-the-pipeline)
-5. [The notebook, cell by cell](#5-the-notebook-cell-by-cell)
+5. [The notebooks, cell by cell](#5-the-notebooks-cell-by-cell)
 6. [Reading the scores and tables](#6-reading-the-scores-and-tables)
 7. [What is available: models, retrievers, maskers, matchers](#7-what-is-available-models-retrievers-maskers-matchers)
 8. [Extending the code](#8-extending-the-code)
@@ -264,20 +264,20 @@ DINOv2 is **not** an object detector here. It produces a description vector, not
 
 ### What exactly is compared: boxes or whole images?
 
-This is the most important design point at the moment, and it's asymmetric:
+It depends on what the gallery items carry:
 
-| | Query side | Gallery side |
-|---|---|---|
-| **Stage 1 (DINOv2)** | Only the prompted region. The default `crop_cls` mode crops the image to the prompt box (plus 10 % padding) before describing it. | **The whole image**, one description per gallery photo. |
-| **Stage 2 (keypoints)** | Only keypoints **inside the mask** (the box, or later the SAM3 mask). | **All keypoints of the whole image**, unless that gallery image has its own prompt. |
+| | Query side | Gallery item **with a box** (your labelled test set) | Gallery item **without a box** (a folder of photos) |
+|---|---|---|---|
+| **Stage 1 (DINOv2)** | Only the prompted region. The default `crop_cls` mode crops to the prompt box (plus 10 % padding). | Only the box: the gallery box is cropped and described the same way. | **The whole image**: one description per photo. |
+| **Stage 2 (keypoints)** | Only keypoints **inside the mask** (the box, or later the SAM3 mask). | Only keypoints inside the gallery box. | **All keypoints of the whole image.** |
 
-So we search with an object against whole scenes. That works well when gallery photos show one dominant object (product shots). It is weaker for cluttered rooms: the background takes part in the semantic comparison, and stage 2 can pick up matches with other furniture. Both real-data failures seen so far come from this (see the [step 6a log](log/2026-11-24-07-sparse-verification-sift.md) and the [step 6b log](log/2026-11-24-08-learned-sparse-matchers.md)).
+**When searching your labelled test set, both stages compare object to object.** Each annotated box is its own gallery entry.
 
-The planned fix is **gallery grounding**: find object boxes in gallery images too, so both stages compare object to object. Two options use what's already here:
-- **Localize with DINOv2:** compare the query description with the gallery's cached patch features, which costs about 1 ms per candidate.
-- **RF-DETR object detection** (already in `models/`): run once offline, and treat each detected object as its own gallery entry.
+**For unlabelled photos, we search with an object against whole scenes.** That works well when gallery photos show one dominant object (product shots). It is weaker for cluttered rooms: the background takes part in the semantic comparison, and stage 2 can pick up matches with other furniture. Both real-data failures seen so far come from this (see the [step 6a log](log/2026-11-24-07-sparse-verification-sift.md) and the [step 6b log](log/2026-11-24-08-learned-sparse-matchers.md)).
 
-This is proposed but not built yet; see [section 10](#10-known-limitations-and-what-comes-next).
+The fix for unlabelled galleries is **gallery grounding**: find the object in each gallery photo, so both stages compare object to object there too.
+- **Decided approach:** localize with DINOv2. The query's features are compared with the gallery photo's cached patch features (about 1 ms per photo), and each found region becomes its own result.
+- **Status:** it comes with the "Search a new gallery" section (step 6c, part 3); see [section 10](#10-known-limitations-and-what-comes-next).
 
 ### What happens under the hood, step by step
 
@@ -311,51 +311,55 @@ The SAM3 image encoding (about 120 MB per image) is kept only **in memory** for 
 
 ---
 
-## 5. The notebook, cell by cell
+## 5. The notebooks, cell by cell
 
-The notebook has five parts; each is a markdown cell followed by code.
+There are two notebooks:
+- **`notebooks/labeling.ipynb`** builds your test set. It's described in [section 3](#the-labelled-test-set-annotationsjson).
+- **`notebooks/cascade.ipynb`** runs the experiments and the interactive search.
 
-**Setup.**
+In both, every code cell is preceded by a markdown cell explaining what it does. The cascade notebook has seven sections.
+
+**1. Setup.**
 - `%matplotlib widget` switches matplotlib to interactive widgets (needed for drawing boxes).
-- The imports pull in the package.
-- The configuration block holds the main knobs: `DINO_MODEL`, `DINO_RESOLUTION` (448), `RETRIEVAL_K` (100) and `SPARSE_K` (20).
-- Paths are resolved relative to the repository root: `data/` and `cache/`.
+- The configuration block holds the main knobs: `TESTSET_DIR` (default `data/testset/`, or the `VS_TESTSET` environment variable), `DINO_MODEL`, `DINO_RESOLUTION` (448), `RETRIEVAL_K` (100) and `SPARSE_K` (20).
 
-**Datasets.** Builds two splits:
-- **Synthetic:** 12 objects × 3 views, 3 look-alike pairs and 40 distractors (smoke test only).
-- **Real:** loaded from `data/`. The validator's report is printed, so you see immediately if an object has too few photos.
-- If the real data has at least one query, both splits are evaluated in the cells below; otherwise only the synthetic one.
+**2. Datasets.**
+- **testset:** your labelled test set from `annotations.json`.
+  - Every box is an item; for each label, one box is the query, and the other boxes of that label must be found among all boxes and distractors.
+  - The validator reports labels with a single box, which are dropped.
+- **folder:** used only without a test set: the older folder-per-object layout under `data/`.
+- **synthetic:** 12 objects × 3 views, 3 look-alike pairs and 40 distractors (smoke test only).
 
-**Stage 1: baselines vs DINOv2.** Loads DINOv2 once, then evaluates five stage-1-only pipelines on each split:
-- `random`: random order, the chance level.
-- `color_hist`: color histogram, which shows what plain color achieves.
-- DINOv2 in three pooling modes (see [section 7](#7-what-is-available-models-retrievers-maskers-matchers)).
+**3. Stage 1: baselines vs DINOv2.** Evaluates random order, a color histogram and DINOv2 in three pooling modes (see [section 7](#7-what-is-available-models-retrievers-maskers-matchers)) on each dataset. The result is one table, with metrics per query box; see [section 6](#6-reading-the-scores-and-tables).
 
-The output is one table; see [section 6](#6-reading-the-scores-and-tables) for how to read it.
+**4. Per-query inspection.** For DINOv2 `crop_cls` on your test set: one row per query box with the rank at which the first correct box was found, plus what came first instead. Sorted worst first.
 
-**Per-query inspection.** For the best stage-1 mode on synthetic data: one row per query with the rank at which the first correct image was found, plus the top-1 result. Sorted with the worst queries first, so the failures are on top.
-
-**Stage 2: sparse verification.** Evaluates DINOv2 plus a stage-2 variant on each split:
+**5. Stage 2: sparse verification.** Evaluates DINOv2 plus a stage-2 variant on each dataset:
 - the estimator (MAGSAC++ vs RANSAC);
 - the geometric model (homography `H`, affine `A`, fundamental `F`);
-- without a mask, and plain SIFT instead of RootSIFT;
-- the two learned matchers, which re-rank only the top 10 because they cost more per pair.
+- without masks, and plain SIFT instead of RootSIFT;
+- the two learned matchers (top 10 only, since they cost more per pair).
 
-**Interactive search.** Builds the app (`SearchApp`) on your real data if it has queries, otherwise on the synthetic set. The pipeline is DINOv2 `crop_cls` → SIFT verification, with the box masker.
-1. **Pick a query** from the dropdown (`id [label]`), or type a path and press *Load path* for any image.
+**6. Search the test set.** An interactive app (`SearchApp`) whose gallery is **every box of your test set**, plus the reviewed images without boxes as distractors. The pipeline is DINOv2 `crop_cls` → SIFT verification, with the box masker.
+1. **Pick a query:** a labelled box from the dropdown (`image#n [label]`), or any image via a path and *Load path*.
 2. **Prompt it.**
    - *Box* mode: drag a rectangle.
    - *Points* mode: left click = on the object; right click or shift+click = exclude.
-   - *Clear* resets the prompt.
-   - After every change the mask preview (blue) updates, and the status line shows how long the mask took.
-   - Zoom and pan work via the canvas toolbar.
-3. **Search.** Shows one row per stage: the query, then the top 5. Each thumbnail has a title and frame. The line above the gallery gives the time per step and the total.
-4. **Detail.** Pick a result to see why it scored as it did:
+   - *Clear* resets the prompt; the blue overlay previews the mask; zoom and pan via the canvas toolbar.
+3. **Expected label.** This decides the ✓/✗ marks.
+   - It's pre-filled for a test-set box.
+   - For a new image, type or pick the label of the object you drew (autocompleted from the test set). Leave it empty for no marks.
+4. **Search.** Shows one row per stage: the query, then the top 5, each as a crop around its box (yellow) with score, label and a green ✓ / red ✗ frame.
+   - A query picked from the test set never finds its own box.
+   - The line above the gallery gives the time per step and the total.
+5. **Detail.** Pick a result to see why it scored as it did:
    - Left: both images with the match lines (green = inliers, faint red = rejected matches).
-   - Right: the gallery image warped onto the query using the fitted homography. If the object is really the same, the warped outline (orange) sits on top of the object.
+   - Right: the gallery image warped onto the query with the fitted homography. If the object is really the same, the warped outline (orange) sits on the object.
    - Matches the stage rejected (too few inliers) are labelled *REJECTED* and get no warp panel.
 
-After a search, `app.last_result` holds all rankings and score components, and `app.timings` the step timings, for further analysis in a new cell.
+**7. Search a new gallery.** Coming in step 6c, part 3. You'll give a folder, glob or file list, draw a box on a query, and get the top-n regions where the object appears (no labels needed, no ✓/✗).
+
+After a search, `testset_app.last_result` holds all rankings and score components, and `testset_app.timings` the step timings.
 
 ---
 
@@ -583,14 +587,14 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 ## 10. Known limitations and what comes next
 
 **Current limitations.**
-- **The gallery is compared as whole images** (see [section 4](#4-how-a-search-works-the-pipeline)). This is the main weakness for cluttered scenes.
+- **Unlabelled galleries are compared as whole images** (see [section 4](#4-how-a-search-works-the-pipeline)). This is the main weakness for cluttered scenes; the labelled test set already compares box to box.
 - **Masks are boxes.** SAM3 masks are wired in but unvalidated.
 - **Stage 2 scores by inlier count only,** which gave one false verification on real data (ALIKED on a room photo) and favors textured objects.
 - **The real dataset is too small to measure anything yet** (one query). Also, `bank_01` holds two *different* sofas of the same model, so it currently measures model-level rather than instance-level matching (see [Exact item or same model?](#exact-item-or-same-model)).
 - **Latency was measured on an 8 GB M2 development machine,** not on the target 16 GB Mac or the GPU server.
 
 **Next steps.**
-1. **Gallery grounding (proposed, awaiting your decision):** DINOv2 patch localization plus RF-DETR object proposals, so both stages compare object to object.
+1. **Step 6c, part 3: gallery grounding and "Search a new gallery":** DINOv2 localization finds the object in each photo of an unlabelled folder; results are per region, top-n.
 2. **Step 7, scoring:** spatial coverage of the query mask, mask overlap after warping, post-warp appearance difference, reprojection error and warp distortion, combined first with hand-set weights and later with weights learned from labelled data.
 3. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5, plus a displacement map in the detail view.
 4. **Step 9, full ablations** on real data and on target hardware.

@@ -67,9 +67,8 @@ class RandomRetriever(Retriever):
 class ColorHistogramRetriever(EmbeddingRetriever):
     """Rank by similarity of HSV color histograms.
 
-    The query histogram is computed inside its prompt box (the whole image if no
-    prompt); gallery histograms use the whole image, matching the image-level
-    gallery of the real pipeline.
+    Histograms are computed inside each item's prompt box (query and gallery alike,
+    e.g. annotated test-set boxes), or over the whole image when there is no prompt.
     """
 
     name = "color_hist"
@@ -109,7 +108,7 @@ class ColorHistogramRetriever(EmbeddingRetriever):
         return self._hist(crop_to_prompt(query.load_image(), query.prompt))
 
     def embed_gallery(self, items: Sequence[Item]) -> NDArray[np.float32]:
-        """Whole-image histograms of gallery items.
+        """Histograms of gallery items (inside their prompt box, if any).
 
         Args:
             items: Gallery items.
@@ -119,4 +118,4 @@ class ColorHistogramRetriever(EmbeddingRetriever):
         """
         if not items:
             return np.zeros((0, int(np.prod(self.bins))), np.float32)
-        return np.stack([self._hist(it.load_image()) for it in items])
+        return np.stack([self._hist(crop_to_prompt(it.load_image(), it.prompt)) for it in items])

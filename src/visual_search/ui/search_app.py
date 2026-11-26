@@ -25,7 +25,7 @@ from visual_search.data.schema import Item, Prompt, is_match
 from visual_search.imaging import prompt_to_mask
 from visual_search.masking.base import BoxMasker, Masker, MaskResult, with_mask
 from visual_search.ui.prompt_widget import PromptWidget
-from visual_search.viz.gallery import render_ranking_grid, thumbnail
+from visual_search.viz.gallery import box_thumbnail, render_ranking_grid, thumbnail
 from visual_search.viz.overlay import overlay_mask
 from visual_search.viz.pairs import render_pair_detail
 
@@ -43,6 +43,9 @@ class SearchApp:
 
     Example:
         >>> app = SearchApp(cascade, split.gallery, split.queries, masker=BoxMasker())
+        >>> # test set: gallery = all annotated boxes, queries = the same boxes (each excluded from its own search)
+        >>> items = parse_dataset(AnnotationSet.load("data/testset").to_records())
+        >>> app = SearchApp(cascade, items, [it for it in items if it.label])
         >>> display(app.widget)
         >>> app.last_result.final[:5]   # after clicking "Search"
     """
@@ -56,6 +59,7 @@ class SearchApp:
         top_k: int = 5,
         use_mask: bool = True,
         thumb_size: int = 256,
+        show_expected_label: bool = True,
     ) -> None:
         """Build the app and index the gallery if the cascade is not prepared yet.
 
@@ -67,6 +71,9 @@ class SearchApp:
             top_k: Candidates shown per stage.
             use_mask: Initial state of the "use mask" checkbox.
             thumb_size: Longer side of gallery thumbnails in pixels.
+            show_expected_label: Show the "Expected" label field. It decides the ✓/✗
+                marks: pre-filled with the query's own label, editable for a new image,
+                empty = no marks.
         """
         self.cascade = cascade
         self.gallery = {it.item_id: it for it in gallery}
@@ -91,6 +98,12 @@ class SearchApp:
         )
         self.path_text = widgets.Text(placeholder="or an image path", layout=widgets.Layout(width="40%"))
         self.load_button = widgets.Button(description="Load path", layout=widgets.Layout(width="100px"))
+        labels = sorted({it.label for it in gallery if it.label})
+        self.expected_label = widgets.Combobox(options=labels, ensure_option=False, description="Expected",
+                                               placeholder="label to check results against (optional)",
+                                               layout=widgets.Layout(width="45%"))
+        if not show_expected_label:
+            self.expected_label.layout.display = "none"
         self.use_mask = widgets.Checkbox(value=use_mask, description=f"use mask ({self.masker.name})")
         self.search_button = widgets.Button(description="Search", button_style="primary")
         self.info = widgets.HTML()
@@ -103,7 +116,7 @@ class SearchApp:
         self.widget = widgets.VBox([
             widgets.HBox([self.query_select, self.path_text, self.load_button]),
             self.prompt_widget.widget,
-            widgets.HBox([self.use_mask, self.search_button]),
+            widgets.HBox([self.expected_label, self.use_mask, self.search_button]),
             self.info,
             self.results,
             self.detail_select,
@@ -132,6 +145,7 @@ class SearchApp:
         self.results.value = b""
         self._reset_detail()
         self.prompt_widget.set_image(self._image)
+        self.expected_label.value = item.label or ""
         self.info.value = f"Query <b>{html.escape(item.item_id)}</b> (label: {html.escape(str(item.label))})"
         if item.prompt is not None and item.prompt.mask is None:
             self.prompt_widget.set_prompt(item.prompt)
@@ -158,11 +172,14 @@ class SearchApp:
         if self.query is None or self._image is None:
             self.info.value = "Select or load a query first."
             return None
-        item = dataclasses.replace(self.query, image=self._image, prompt=self.prompt_widget.prompt)
+        expected = self.expected_label.value.strip() or None
+        item = dataclasses.replace(self.query, image=self._image, prompt=self.prompt_widget.prompt, label=expected)
         timings = {k: v for k, v in self.timings.items() if k.startswith("mask")}
         if self.use_mask.value and self.mask_result is not None and item.prompt is not None:
             item = with_mask(item, self.mask_result)
-        result = self.cascade.run(item)
+        # A query picked from the gallery (e.g. a test-set box) must not find itself.
+        exclude = {self.query.item_id} if self.query.item_id in self.gallery else set()
+        result = self.cascade.run(item, exclude=exclude)
         self.last_result = result
         self.timings = {**timings, **result.timings}
         self._query_item = item
@@ -243,7 +260,12 @@ class SearchApp:
     def _thumb(self, item_id: str) -> NDArray[np.uint8]:
         """Return (and memoize) a gallery thumbnail."""
         if item_id not in self._thumbs:
-            self._thumbs[item_id] = thumbnail(self.gallery[item_id].load_image(), self.thumb_size)
+            item = self.gallery[item_id]
+            image = item.load_image()
+            if item.prompt is not None and item.prompt.mask is None:
+                self._thumbs[item_id] = box_thumbnail(image, item.prompt.bbox(), max_side=self.thumb_size)
+            else:
+                self._thumbs[item_id] = thumbnail(image, self.thumb_size)
         return self._thumbs[item_id]
 
     def _render(self, result: QueryResult, item: Item) -> None:
@@ -263,5 +285,6 @@ class SearchApp:
             query_vis, result.stages, self._thumb, correct, k=self.top_k,
             label_of=lambda i: self.gallery[i].label, title=f"{item.item_id}: {timing} | total {total:.0f} ms",
         )
-        self.info.value = (f"Query <b>{html.escape(item.item_id)}</b> (label: {html.escape(str(item.label))})"
+        expected = f"expected label: {html.escape(item.label)}" if labelled else "no expected label (no ✓/✗)"
+        self.info.value = (f"Query <b>{html.escape(item.item_id)}</b> ({expected})"
                            f" &mdash; {html.escape(timing)} &mdash; total {total:.0f} ms")

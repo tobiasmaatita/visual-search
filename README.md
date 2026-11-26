@@ -23,6 +23,7 @@ uv run ruff check src tests
 - [notebooks/labeling.ipynb](notebooks/labeling.ipynb): label your own test set. Draw boxes, give them item labels (and optional groups) and save them to `annotations.json`.
 - [notebooks/search.ipynb](notebooks/search.ipynb): free play. Search your test set (with ✓/✗) or any new photo collection.
 - [notebooks/evaluation.ipynb](notebooks/evaluation.ipynb): measure and compare approaches on the test set (item and model level, grounding, per label, failures, latency). Results are saved to `results/`.
+- [notebooks/warp.ipynb](notebooks/warp.ipynb): search, pick a result from the top-n and watch it warp onto your query (homography, affine, thin-plate spline) as an animation; save it as a GIF.
 
 JupyterLab is a dev dependency, so after `uv sync`:
 

@@ -130,6 +130,16 @@ class SearchApp:
         if self.queries:
             self.query_select.value = 0
 
+    @property
+    def query_image(self) -> NDArray[np.uint8] | None:
+        """The pixels of the current query image (None before a query is loaded)."""
+        return self._image
+
+    @property
+    def searched_query(self) -> Item | None:
+        """The query exactly as the last search used it (prompt/mask, expected label), or None."""
+        return self._query_item
+
     # --- actions ------------------------------------------------------------------
 
     def load_query(self, item: Item) -> None:

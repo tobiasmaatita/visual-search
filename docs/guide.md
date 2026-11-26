@@ -1,6 +1,6 @@
 # Repository guide
 
-This guide explains what the code in this repository does and how to use it. It starts from the notebooks ([`notebooks/`](../notebooks/)) and works down into the `visual_search` package. It describes the state after step 6d: the labeling notebook, search on your labelled test set and on unlabelled photo collections (gallery grounding), and the evaluation notebook. The step-by-step history, with measurements, is in the [change log](log/README.md).
+This guide explains what the code in this repository does and how to use it. It starts from the notebooks ([`notebooks/`](../notebooks/)) and works down into the `visual_search` package. It describes the state after step 6e: the labeling notebook, search on your labelled test set and on unlabelled photo collections (gallery grounding), the evaluation notebook, and the warp notebook. The step-by-step history, with measurements, is in the [change log](log/README.md).
 
 **Contents**
 
@@ -59,10 +59,11 @@ The SAM3 and RF-DETR ONNX files are not downloaded; they live in `models/` (giti
 uv run --all-extras jupyter lab
 ```
 
-Open one of the three notebooks in `notebooks/` and choose *Run → Run All Cells*:
+Open one of the four notebooks in `notebooks/` and choose *Run → Run All Cells*:
 - `labeling.ipynb` builds your test set;
 - `search.ipynb` is free play (search with your own boxes);
-- `evaluation.ipynb` measures and compares approaches.
+- `evaluation.ipynb` measures and compares approaches;
+- `warp.ipynb` animates how a search result warps onto your query.
 
 They are described in [section 5](#5-the-notebooks-cell-by-cell). The first run computes and caches features in `cache/`. Later runs reuse them and only pay for the queries.
 
@@ -331,13 +332,14 @@ The SAM3 image encoding (about 120 MB per image) is kept only **in memory** for 
 
 ## 5. The notebooks, cell by cell
 
-There are three notebooks, one per job. In all of them, every code cell is preceded by a markdown cell explaining what it does.
+There are four notebooks, one per job. In all of them, every code cell is preceded by a markdown cell explaining what it does.
 
 | Notebook | Job | Needs |
 |---|---|---|
 | `labeling.ipynb` | Build your test set: boxes + labels → `annotations.json` | A folder of photos |
 | `search.ipynb` | Free play: draw a box and see what is found | DINOv2 (and a test set for section 3) |
 | `evaluation.ipynb` | Measure and compare approaches on the test set | A labelled test set (falls back to synthetic data) |
+| `warp.ipynb` | Watch a search result warp onto your query; save as GIF | DINOv2 (test set or any photo folder) |
 
 ### `labeling.ipynb`
 
@@ -414,6 +416,50 @@ Each is shown at stage 1 and after SIFT, plus a localization table: the median I
 **8. Latency.** Median and p95 per stage and in total, for every pipeline. **This is search cost, not interactive latency.** Every query box is also a gallery box, so its features were computed during indexing. A fresh query adds its own feature extraction: about 55 ms for DINOv2 at 448 px on an M2, plus the matcher's keypoints.
 
 **9. Save the results.** All tables as CSV in `results/<date-time>_<RUN_NAME>/` (gitignored), so runs can be compared over time.
+
+### `warp.ipynb`
+
+Search as usual, pick one of the top results, and watch it being **warped onto your query object**. If both show the same physical item, seams, creases and patterns slide into place and stop moving at the end; for a different item they don't line up, and the warp often stretches wildly.
+
+**How the warp is made** ([`warp/models.py`](../src/visual_search/warp/models.py)): from the keypoint matches (stage 2's, or computed on the spot), three warps are fitted:
+- **H** (homography): a flat surface from another angle.
+- **A** (affine): rotation, scale and shear, no perspective.
+- **TPS** (thin-plate spline): a smooth *bendable* warp through the matches, for fabric, cushions and small 3D effects. Its control points are the inliers of a robust fundamental-matrix fit (consistent with a rigid 3D scene, not necessarily flat). `TPS_STIFFNESS` trades exactness against smoothness.
+
+The animation starts with the result simply resized into your query box (t = 0) and ends with the full warp (t = 1). The motion in between is exactly what the warp adds.
+
+**1. Setup.** The knobs:
+- `TOP_N`: results you can pick from;
+- `N_FRAMES`, `CANVAS_SIDE`, `TPS_STIFFNESS`;
+- `OUTPUT_DIR` (`results/warps/`);
+- `GALLERY_SOURCE`: `None` = your test set, or a folder / glob / list of photos, searched with grounding.
+
+**2. Gallery and queries.** Test-set boxes, or the photo collection.
+
+**3. The warp app** (`WarpApp`):
+1. **Search.** The familiar search panel on top: query, box, **Search**, results per stage.
+2. **Candidate.** Pick one of the top `TOP_N`. The pair appears **side by side** (query box | candidate box or found region), with the number of matches and which warps could be fitted.
+   - Below 8 agreeing matches, a warning says the warps are unreliable. A wildly stretched warp then usually means it's not the same item.
+3. **Model and view.** Model **TPS**, **H** or **A**, or *all models side by side*. View:
+   - **morph:** the candidate deforms over your query; green dots are matches travelling into place;
+   - **grid:** a grid on the candidate bends with the warp;
+   - **flicker:** a blink between your query and the fully warped candidate;
+   - **residual:** a difference heatmap inside your box that fades as the warp completes.
+4. **Warp ▶** renders and plays the animation in a loop. Play/pause, scrub with the frame slider, change the speed with fps.
+5. **Save GIF** writes the current animation to `results/warps/`.
+
+The table under the animation has one row per model:
+- `points`: matches used;
+- `reproj_px`: how far warped matches land from their partners;
+- `strain`: how unevenly the warp stretches inside your box (0 = rigid; large often means a wrong match);
+- `residual`: the remaining appearance difference after warping (0–1).
+
+**4. Export every view at once.** After picking a candidate, this saves all four views of one model as GIFs and shows the morph inline.
+
+**In code:**
+- `warp_pair(query_image, query_box, cand_image, cand_box)` gives the pair and its fitted warps;
+- `warp_frames(pair, warp, view)` gives the frames;
+- `save_gif(frames, path)` writes them.
 
 ---
 
@@ -643,15 +689,19 @@ src/visual_search/
                 inspect.py      per-label table, failure grids, localization stats, latency, CSV export
   cache.py                      on-disk feature cache
   device.py, timing.py, imaging.py   helpers (device choice, stage timers, prompt→box/mask)
+  warp/         models.py       warp models (H, A, TPS) with partial warps for animation; fit_warps
   ui/           prompt_widget.py  draw box / click points (ipympl)
                 labeling.py       the labeling app
                 search_app.py     the interactive search app
+                warp_app.py       search + pick a result + animate its warp (WarpApp, warp_pair)
   viz/          gallery.py, pairs.py, overlay.py   result grid, match/warp view, mask overlays
+                animation.py      warp animation frames (morph / grid / flicker / residual), GIF export
 
 notebooks/labeling.ipynb   build your own test set (boxes + labels)
 notebooks/search.ipynb     free play: test-set search, new-gallery search
 notebooks/evaluation.ipynb measurements and comparisons on the test set
-results/                   saved evaluation tables (gitignored)
+notebooks/warp.ipynb       animate a search result warping onto the query; GIF export
+results/                   saved evaluation tables and warp GIFs (gitignored)
 scripts/try_sam3.py       manual SAM3 go/no-go check (timings + overlay)
 tests/                    pytest suite, one file per area
 docs/log/                 change log: what changed, why, with numbers
@@ -673,7 +723,7 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 
 **Next steps.**
 1. **Step 7, scoring:** spatial coverage of the query mask, mask overlap after warping, post-warp appearance difference, reprojection error and warp distortion, combined first with hand-set weights and later with weights learned from labelled data.
-2. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5, plus a displacement map in the detail view.
+2. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5. Its dense warp plugs into the warp notebook as a fourth model, next to H, A and TPS.
 3. **Step 9, full ablations** on real data and on target hardware, using the evaluation notebook.
 
 **What you can do now.**

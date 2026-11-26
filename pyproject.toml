@@ -5,6 +5,7 @@ description = "Instance-level re-ranking cascade for visual prompting (retrieval
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "imageio>=2.38.2",
     "ipympl>=0.10.0",
     "ipywidgets>=8.1.9",
     "matplotlib>=3.11.2",

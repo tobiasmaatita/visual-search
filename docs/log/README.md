@@ -2,6 +2,7 @@
 
 Newest first. One entry per significant change; see CLAUDE.md for the rules.
 
+- 2026-11-26: [Per-object annotations and a labeling notebook (step 6c, part 1)](2026-11-26-01-labeling-notebook.md)
 - 2026-11-24: [Learned sparse matchers: ALIKED + LightGlue, XFeat + LighterGlue](2026-11-24-08-learned-sparse-matchers.md)
 - 2026-11-24: [Stage 2: sparse matching (SIFT/RootSIFT) + geometric verification, pair detail view](2026-11-24-07-sparse-verification-sift.md)
 - 2026-11-24: [Interactive prompting UI and stage-1 results gallery](2026-11-24-06-interactive-ui.md)

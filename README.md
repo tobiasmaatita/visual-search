@@ -19,7 +19,10 @@ uv run pytest                         # run the tests
 uv run ruff check src tests
 ```
 
-### Notebook
+### Notebooks
+- [notebooks/labeling.ipynb](notebooks/labeling.ipynb): label your own test set. Draw boxes, give them item labels and save them to `annotations.json`.
+- [notebooks/cascade.ipynb](notebooks/cascade.ipynb): the main experiment notebook.
+
 The main experiment notebook is [notebooks/cascade.ipynb](notebooks/cascade.ipynb). JupyterLab is a dev dependency, so after `uv sync`:
 
 ```bash

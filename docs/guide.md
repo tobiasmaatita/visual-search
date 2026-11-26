@@ -1,6 +1,6 @@
 # Repository guide
 
-This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6b (learned sparse matchers). The step-by-step history, with measurements, is in the [change log](log/README.md).
+This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c part 1 (the labeling notebook). The step-by-step history, with measurements, is in the [change log](log/README.md).
 
 **Contents**
 
@@ -102,7 +102,14 @@ Tests that need the learned-matcher weights are skipped if those weights aren't 
 
 ## 3. Your data: what to provide and what to label
 
-### The short answer
+### Two ways to provide data
+
+- **A labelled test set (recommended for evaluation).** Put the images in one folder (default `data/testset/`) and label them in [`notebooks/labeling.ipynb`](../notebooks/labeling.ipynb).
+  - You draw a box around each object and give it a label, so a photo can contain several labelled objects.
+  - The labels are saved to `annotations.json` next to the images, and metrics are computed per box. See [the labeling section](#the-labelled-test-set-annotationsjson) below.
+- **Folder per object (quick start).** Sort whole photos into one folder per object, as described next. This is fine for photos with one object each.
+
+### The short answer (folder per object)
 
 - **Put images in folders; that's the labelling.** One folder per physical object, and the folder name is the label. No annotation tool or label file is needed.
 - **Every object you want to evaluate on needs at least two photos.** One becomes the query and the rest stay in the gallery to be found.
@@ -147,6 +154,28 @@ You don't label queries and gallery separately. The code **splits your labelled 
 
 A result is correct when the query and the gallery image have the same label, and the label isn't `None`. Distractors are never correct.
 
+### The labelled test set (`annotations.json`)
+
+The labeling notebook writes this file into the image folder:
+
+```json
+{"version": 1, "images": {
+  "living_room_3.jpg": [
+    {"box": [63, 335, 535, 568], "label": "bank_01", "group": "sofa_model_x"},
+    {"box": [600, 120, 780, 500], "label": "billy_01"}
+  ],
+  "kitchen.jpg": []
+}}
+```
+
+- **`label`** = the exact item; **`group`** (optional) = a coarser identity such as the model.
+- **Every box becomes one test item** with id `image#n` and the box as its prompt, so metrics are per box.
+  - For each label, one box is the query and the other boxes of that label must be found among all boxes and distractors.
+- **`"kitchen.jpg": []`** means reviewed, with nothing to label: a whole-image distractor. Images that aren't in the file at all are *not labelled yet* and are left out.
+- **Consistent labels:** the label field autocompletes from labels already used, and a new label that looks like an existing one (`Bank_01` vs `bank_01`, a typo) needs an explicit *Add anyway*. Different numbers (`bank_01` vs `bank_02`) are treated as deliberately different items.
+- **A label with a single box can't be evaluated** (there's nothing to find), and the notebook flags it.
+- **In code:** `AnnotationSet.load(folder)` reads the file, and `.to_records()` gives the items for `split_dataset` and `evaluate`.
+
 ### Exact item or same model?
 
 Your use case has two levels of "the same", both stricter than "the same kind of thing":
@@ -160,7 +189,7 @@ The planned way to support both levels needs no change to the folder layout:
 - an optional `group` key names the **model** (the schema already keeps such extra keys);
 - the evaluation then reports Recall for both levels side by side.
 
-Until that exists, choose per folder what you want to measure. Note also that geometric verification (stage 2) is an instance-level tool: two physical copies of a model share their shape but not their exact creases and wear.
+The labeling notebook already records the `group`. Reporting metrics per group comes with the evaluation work. Until then, choose per label what you want to measure. Note also that geometric verification (stage 2) is an instance-level tool: two physical copies of a model share their shape but not their exact creases and wear.
 
 Before splitting, the validator checks the dataset and reports problems. The most common is an object folder with only one image (currently `billy_01`). In the notebook's lenient mode such objects are dropped from evaluation with a warning instead of stopping the run.
 
@@ -533,10 +562,13 @@ src/visual_search/
                 harness.py   evaluate(), comparison_table()
   cache.py                   on-disk feature cache
   device.py, timing.py, imaging.py   helpers (device choice, stage timers, prompt→box/mask)
+  data/annotations.py        annotations.json: per-object boxes + labels, label checks
   ui/           prompt_widget.py  draw box / click points (ipympl)
+                labeling.py       the labeling app
                 search_app.py     the interactive app
   viz/          gallery.py, pairs.py, overlay.py   result grid, match/warp view, mask overlays
 
+notebooks/labeling.ipynb  build your own test set (boxes + labels)
 notebooks/cascade.ipynb   orchestration and result tables
 scripts/try_sam3.py       manual SAM3 go/no-go check (timings + overlay)
 tests/                    pytest suite, one file per area
@@ -564,6 +596,7 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 4. **Step 9, full ablations** on real data and on target hardware.
 
 **What you can do now.**
+- Label a test set in `notebooks/labeling.ipynb`, with several photos per object.
 - Add more real photos, with several objects and at least two photos each.
 - Test SAM3 fp16 on your 16 GB Mac and on the GPU server with `scripts/try_sam3.py`.
 - Decide how to label "same model": in the same folder, or in separate folders once `group` labels are supported.

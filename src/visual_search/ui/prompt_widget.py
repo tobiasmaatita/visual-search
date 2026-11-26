@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backend_bases import MouseEvent
+from matplotlib.patches import Rectangle
 from matplotlib.widgets import RectangleSelector
 from numpy.typing import NDArray
 
@@ -75,6 +76,7 @@ class PromptWidget:
         self._image_artist: Any = None
         self._mask_artist: Any = None
         self._selector: RectangleSelector | None = None
+        self._box_artists: list[Any] = []
 
         self.mode = widgets.ToggleButtons(options=[("Box", "box"), ("Points", "points")], value="box",
                                           description="Prompt", style={"button_width": "70px"})
@@ -124,6 +126,33 @@ class PromptWidget:
         self._draw_prompt()
         if notify:
             self._notify()
+
+    def show_boxes(
+        self,
+        boxes: Sequence[tuple[tuple[float, float, float, float], str, str]],
+        highlight: int | None = None,
+    ) -> None:
+        """Draw labelled boxes on the image (e.g. existing annotations), replacing earlier ones.
+
+        Args:
+            boxes: ``(box, text, color)`` per box; ``box`` is ``(x0, y0, x1, y1)`` in pixels,
+                ``color`` any matplotlib color.
+            highlight: Index of a box to draw thicker (e.g. the selected one).
+        """
+        for artist in self._box_artists:
+            artist.remove()
+        self._box_artists = []
+        if self._ax is None:
+            return
+        for i, (box, text, color) in enumerate(boxes):
+            x0, y0, x1, y1 = box
+            rect = Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor=color,
+                             linewidth=3.5 if i == highlight else 1.5, zorder=3)
+            self._ax.add_patch(rect)
+            label = self._ax.text(x0, y0, text, color="white", fontsize=8, va="bottom", clip_on=True, zorder=4,
+                                  bbox={"facecolor": color, "alpha": 0.75, "pad": 1.5, "edgecolor": "none"})
+            self._box_artists += [rect, label]
+        self.figure.canvas.draw_idle()
 
     def show_mask(self, mask: NDArray[np.bool_] | None) -> None:
         """Overlay a mask preview on the image (``None`` removes it).

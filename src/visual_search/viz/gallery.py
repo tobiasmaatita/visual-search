@@ -43,7 +43,7 @@ def box_thumbnail(
     where they are.
 
     Args:
-        image: ``(H, W, 3)`` uint8 RGB.
+        image: ``(H, W, 3)`` uint8 RGB. May be read-only; it is never modified.
         box: ``(x0, y0, x1, y1)`` in pixels.
         pad: Context added on each side, as a fraction of the box size.
         max_side: Longer side of the result in pixels.
@@ -54,9 +54,15 @@ def box_thumbnail(
     h, w = image.shape[:2]
     x0, y0, x1, y1 = box
     bw, bh = x1 - x0, y1 - y0
-    cx0, cy0 = int(max(0, x0 - pad * bw)), int(max(0, y0 - pad * bh))
-    cx1, cy1 = int(min(w, x1 + pad * bw)), int(min(h, y1 + pad * bh))
-    crop = np.ascontiguousarray(image[cy0 : max(cy1, cy0 + 1), cx0 : max(cx1, cx0 + 1)])
+    cx0 = min(w - 1, int(max(0, x0 - pad * bw)))
+    cy0 = min(h - 1, int(max(0, y0 - pad * bh)))
+    cx1 = max(cx0 + 1, int(min(w, x1 + pad * bw)))
+    cy1 = max(cy0 + 1, int(min(h, y1 + pad * bh)))
+
+    # Always copy: slicing gives a view, which may be read-only (e.g. from PIL)
+    # and would otherwise let the drawing below modify the caller's image.
+    crop = image[cy0:cy1, cx0:cx1].copy()
+
     t = max(2, round(max(crop.shape[:2]) / 120))
     cv2.rectangle(crop, (int(x0 - cx0), int(y0 - cy0)), (int(x1 - cx0), int(y1 - cy0)), (255, 220, 0), t)
     return thumbnail(crop, max_side)

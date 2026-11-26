@@ -105,7 +105,7 @@ def render_ranking_grid(
     cols = min(k, per_row)
     rows_per_stage = max(1, -(-k // per_row))
     n_rows, n_cols = len(names) * rows_per_stage, cols + 1
-    fig = Figure(figsize=(cell_inches * n_cols, (cell_inches + 0.6) * n_rows))
+    fig = Figure(figsize=(cell_inches * n_cols, (cell_inches + 0.9) * n_rows))
     axes = fig.subplots(n_rows, n_cols, squeeze=False)
     query_thumb = thumbnail(query_image)
     for s_idx, name in enumerate(names):

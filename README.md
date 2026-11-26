@@ -20,16 +20,17 @@ uv run ruff check src tests
 ```
 
 ### Notebooks
-- [notebooks/labeling.ipynb](notebooks/labeling.ipynb): label your own test set. Draw boxes, give them item labels and save them to `annotations.json`.
-- [notebooks/cascade.ipynb](notebooks/cascade.ipynb): the main experiment notebook.
+- [notebooks/labeling.ipynb](notebooks/labeling.ipynb): label your own test set. Draw boxes, give them item labels (and optional groups) and save them to `annotations.json`.
+- [notebooks/search.ipynb](notebooks/search.ipynb): free play. Search your test set (with ✓/✗) or any new photo collection.
+- [notebooks/evaluation.ipynb](notebooks/evaluation.ipynb): measure and compare approaches on the test set (item and model level, grounding, per label, failures, latency). Results are saved to `results/`.
 
-The main experiment notebook is [notebooks/cascade.ipynb](notebooks/cascade.ipynb). JupyterLab is a dev dependency, so after `uv sync`:
+JupyterLab is a dev dependency, so after `uv sync`:
 
 ```bash
 uv run jupyter lab
 ```
 
-Open `notebooks/cascade.ipynb`. The default "Python 3" kernel is the project's `.venv`. The **Interactive search** section at the bottom lets you pick a query, draw a box or click points, preview the mask and browse the results. It uses ipympl (`%matplotlib widget`), which is included in the dependencies.
+Open a notebook from `notebooks/`. The default "Python 3" kernel is the project's `.venv`. The interactive widgets use ipympl (`%matplotlib widget`), which is included in the dependencies.
 
 To use the environment from a JupyterLab installed elsewhere, register it as a named kernel instead:
 
@@ -37,10 +38,10 @@ To use the environment from a JupyterLab installed elsewhere, register it as a n
 uv run python -m ipykernel install --user --name visual-search
 ```
 
-To run the notebook headless (a smoke check):
+To run a notebook headless (a smoke check):
 
 ```bash
-cd notebooks && uv run jupyter nbconvert --to notebook --execute --stdout cascade.ipynb > /dev/null
+cd notebooks && uv run jupyter nbconvert --to notebook --execute --stdout evaluation.ipynb > /dev/null
 ```
 
 ### Evaluating a pipeline in code

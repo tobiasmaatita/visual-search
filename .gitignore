@@ -236,3 +236,4 @@ __marimo__/
 # visual-search local data and caches
 /data/
 cache/
+/results/

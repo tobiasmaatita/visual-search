@@ -377,3 +377,25 @@ class AnnotationSet:
                     rec["group"] = b.group
                 records.append(rec)
         return records
+
+    def boxes_by_image(self) -> dict[str, list[tuple[tuple[float, float, float, float], str | None, str | None]]]:
+        """Return reviewed image -> its annotated objects ``(box, label, group)``.
+
+        Used to judge whether a region found by grounding hits the right object.
+        """
+        return {rel: [(b.box, b.label, b.group) for b in boxes]
+                for rel, boxes in self.images.items() if (self.root / rel).exists()}
+
+    def image_records(self) -> list[dict[str, Any]]:
+        """Return one record per reviewed image, without boxes or labels.
+
+        This is the test set seen as an *unlabelled photo collection*: the gallery
+        for evaluating grounding, where the system must find the objects itself.
+        Ids are the relative image paths (equal to the box items' ``image_id``).
+
+        Returns:
+            Records ``{"id", "input_image", "label": None, "image_id"}``, sorted by id.
+        """
+        return [{"id": rel, "input_image": self.root / rel, "label": None, "image_id": rel}
+                for rel in sorted(self.images) if (self.root / rel).exists()]
+

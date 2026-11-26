@@ -1,6 +1,6 @@
 # Repository guide
 
-This guide explains what the code in this repository does and how to use it. It starts from the interactive notebook ([`notebooks/cascade.ipynb`](../notebooks/cascade.ipynb)) and works down into the `visual_search` package. It describes the state after step 6c (the labeling notebook, search on your labelled test set, and gallery grounding for unlabelled photo collections). The step-by-step history, with measurements, is in the [change log](log/README.md).
+This guide explains what the code in this repository does and how to use it. It starts from the notebooks ([`notebooks/`](../notebooks/)) and works down into the `visual_search` package. It describes the state after step 6d: the labeling notebook, search on your labelled test set and on unlabelled photo collections (gallery grounding), and the evaluation notebook. The step-by-step history, with measurements, is in the [change log](log/README.md).
 
 **Contents**
 
@@ -59,7 +59,12 @@ The SAM3 and RF-DETR ONNX files are not downloaded; they live in `models/` (giti
 uv run jupyter lab
 ```
 
-Open `notebooks/cascade.ipynb` and choose *Run → Run All Cells*. The interactive search app is at the bottom of the notebook.
+Open one of the three notebooks in `notebooks/` and choose *Run → Run All Cells*:
+- `labeling.ipynb` builds your test set;
+- `search.ipynb` is free play (search with your own boxes);
+- `evaluation.ipynb` measures and compares approaches.
+
+They are described in [section 5](#5-the-notebooks-cell-by-cell).
 
 The first run computes and caches features in `cache/`. Later runs reuse them and only pay for the queries.
 
@@ -68,14 +73,15 @@ The first run computes and caches features in `cache/`. Later runs reuse them an
 Everything the notebook does is a few lines of Python:
 
 ```python
-from visual_search.data import load_folder_dataset, split_dataset
+from visual_search.data import AnnotationSet
+from visual_search.data.schema import parse_dataset
 from visual_search.cascade import Cascade
 from visual_search.models.dinov2 import Dinov2Backbone
 from visual_search.retrieval import DinoRetriever
 from visual_search.stages import SparseVerificationStage
-from visual_search.eval import evaluate
+from visual_search.eval import default_judges, evaluate_leave_one_out
 
-split = split_dataset(load_folder_dataset("data"), seed=0, strict=False)
+items = parse_dataset(AnnotationSet.load("data/testset").to_records())   # one item per labelled box
 
 cascade = Cascade(
     DinoRetriever(Dinov2Backbone("facebook/dinov2-small"), pooling="crop_cls", cache_dir="cache"),
@@ -83,10 +89,11 @@ cascade = Cascade(
     stages=[SparseVerificationStage("sift", top_k=20, cache_dir="cache")],  # stage 2 re-ranks the top-20
 )
 
-report = evaluate(cascade, split)          # batch evaluation over all queries
-print(report)                              # Recall@k / MRR per stage, latency per stage
+report = evaluate_leave_one_out(cascade, items, judges=default_judges())  # every box is a query once
+print(report)                              # R@k / MRR per stage (item + model level), latency per stage
 
-result = cascade.run(split.queries[0])     # one query
+query = next(it for it in items if it.label)
+result = cascade.run(query, exclude={query.item_id})   # one query
 [(c.item_id, c.score) for c in result.final[:5]]
 ```
 
@@ -147,10 +154,9 @@ That depends on what you want to do:
 | **Evaluation** (Recall@1/5, MRR) | Every image of every object you want measured: it must be in its object's folder (or boxed and labelled in the test set). Distractors stay unlabelled. |
 | **A "hard negative"** (same model, different physical object) | Give it its *own* label (e.g. `bank_02`), not the same label. The optional `group` field marks such look-alike groups (see below). |
 
-You don't label queries and gallery separately. The code **splits your labelled data itself** ([`data/split.py`](../src/visual_search/data/split.py)):
-- For every object, one image or box (configurable) is drawn at random as the query; the rest stay in the gallery.
-- All distractors go to the gallery.
-- The draw is reproducible from a seed and doesn't depend on file order.
+You don't label queries and gallery separately. The evaluation picks queries from your labelled data itself:
+- **Leave-one-out** (the evaluation notebook's default, `evaluate_leave_one_out`): every labelled box is a query once. It is searched against all other boxes and the distractors, with everything from its own photo left out, so it must be found in *other* photos. This uses all your labels.
+- **One query per label** (`split_dataset` + `evaluate`, [`data/split.py`](../src/visual_search/data/split.py)): for every object one box is drawn at random (reproducibly from a seed) as the query; the rest stay in the gallery.
 
 A result is correct when the query and the gallery item have the same label, and the label isn't `None`. Distractors are never correct.
 
@@ -264,7 +270,7 @@ DINOv2 is **not** an object detector here. It produces a description vector (and
 
 It depends on what the gallery items carry and which stage-1 retriever is used:
 
-| | Query side | Gallery item **with a box** (labelled test set) | Photo **without a box**, grounded (`GroundedDinoRetriever`, notebook section 7) | Photo **without a box**, not grounded (`DinoRetriever`) |
+| | Query side | Gallery item **with a box** (labelled test set) | Photo **without a box**, grounded (`GroundedDinoRetriever`, `search.ipynb` section 4) | Photo **without a box**, not grounded (`DinoRetriever`) |
 |---|---|---|---|---|
 | **Stage 1 (DINOv2)** | Only the prompted region. `crop_cls` crops to the prompt box (plus 10 % padding); grounding averages the patch features under it. | Only the box. | **The regions where the object was found:** up to 3 per photo, each its own result. | The whole image. |
 | **Stage 2 (keypoints)** | Only keypoints **inside the mask** (the box, or later the SAM3 mask). | Only keypoints inside the box. | Only keypoints inside the found region. | All keypoints of the whole image. |
@@ -327,34 +333,28 @@ The SAM3 image encoding (about 120 MB per image) is kept only **in memory** for 
 
 ## 5. The notebooks, cell by cell
 
-There are two notebooks:
-- **`notebooks/labeling.ipynb`** builds your test set. It's described in [section 3](#the-labelled-test-set-annotationsjson).
-- **`notebooks/cascade.ipynb`** runs the experiments and the interactive searches.
+There are three notebooks, one per job. In all of them, every code cell is preceded by a markdown cell explaining what it does.
 
-In both, every code cell is preceded by a markdown cell explaining what it does. The cascade notebook has seven sections.
+| Notebook | Job | Needs |
+|---|---|---|
+| `labeling.ipynb` | Build your test set: boxes + labels → `annotations.json` | A folder of photos |
+| `search.ipynb` | Free play: draw a box and see what is found | DINOv2 (and a test set for section 3) |
+| `evaluation.ipynb` | Measure and compare approaches on the test set | A labelled test set (falls back to synthetic data) |
 
-**1. Setup.**
-- `%matplotlib widget` switches matplotlib to interactive widgets (needed for drawing boxes).
-- The configuration block holds the main knobs: `TESTSET_DIR` (default `data/testset/`, or the `VS_TESTSET` environment variable), `DINO_MODEL`, `DINO_RESOLUTION` (448), `RETRIEVAL_K` (100) and `SPARSE_K` (20).
+### `labeling.ipynb`
 
-**2. Datasets.**
-- **testset:** your labelled test set from `annotations.json`.
-  - Every box is an item; for each label, one box is the query, and the other boxes of that label must be found among all boxes and distractors.
-  - The validator reports labels with a single box, which are dropped.
-- **folder:** used only without a test set: the older folder-per-object layout under `data/`.
-- **synthetic:** 12 objects × 3 views, 3 look-alike pairs and 40 distractors (smoke test only).
+Described in [section 3](#the-labelled-test-set-annotationsjson). Setup, the labeling app, a label check table, and a preview of the test items.
 
-**3. Stage 1: baselines vs DINOv2.** Evaluates random order, a color histogram and DINOv2 in three pooling modes (see [section 7](#7-what-is-available-models-retrievers-maskers-matchers)) on each dataset. The result is one table, with metrics per query box; see [section 6](#6-reading-the-scores-and-tables).
+### `search.ipynb` (free play)
 
-**4. Per-query inspection.** For DINOv2 `crop_cls` on your test set: one row per query box with the rank at which the first correct box was found, plus what came first instead. Sorted worst first.
+**1. Setup.** `%matplotlib widget`, the main knobs, and loading DINOv2 once:
+- `TESTSET_DIR` (default `data/testset/`, or the `VS_TESTSET` environment variable);
+- `DINO_MODEL`, `DINO_RESOLUTION` (448), `RETRIEVAL_K` (100), `SPARSE_K` (20);
+- `MASKER` (box mask; SAM3 once validated).
 
-**5. Stage 2: sparse verification.** Evaluates DINOv2 plus a stage-2 variant on each dataset:
-- the estimator (MAGSAC++ vs RANSAC);
-- the geometric model (homography `H`, affine `A`, fundamental `F`);
-- without masks, and plain SIFT instead of RootSIFT;
-- the two learned matchers (top 10 only, since they cost more per pair).
+**2. Your test set.** Loads the boxes from `annotations.json`, falling back to synthetic data.
 
-**6. Search the test set.** An interactive app (`SearchApp`) whose gallery is **every box of your test set**, plus the reviewed images without boxes as distractors. The pipeline is DINOv2 `crop_cls` → SIFT verification, with the box masker.
+**3. Search the test set.** An interactive app (`SearchApp`) whose gallery is **every box of your test set**, plus the reviewed images without boxes as distractors. The pipeline is DINOv2 `crop_cls` → SIFT verification.
 1. **Pick a query:** a labelled box from the dropdown (`image#n [label]`), or any image via a path and *Load path*.
 2. **Prompt it.**
    - *Box* mode: drag a rectangle.
@@ -373,7 +373,7 @@ In both, every code cell is preceded by a markdown cell explaining what it does.
 
 After a search, `testset_app.last_result` holds all rankings and score components, and `testset_app.timings` the step timings.
 
-**7. Search a new gallery.** Search any collection of photos, with no labels needed.
+**4. Search a new gallery.** Search any collection of photos, with no labels needed.
 1. **Choose the gallery.** Set `GALLERY_SOURCE` to a folder (all images, including subfolders), a glob pattern (`"/path/**/*.jpg"`) or a list of file paths, and `TOP_N` to the number of results.
 2. **Build the app.** The cascade is `GroundedDinoRetriever` → SIFT verification of the top `max(SPARSE_K, TOP_N)` regions.
 3. **Query.** Load a query by path (or pick a test-set box), draw a box and press **Search**.
@@ -381,29 +381,81 @@ After a search, `testset_app.last_result` holds all rankings and score component
 
 After a search, `gallery_app.last_result` holds every candidate with its `region`.
 
+### `evaluation.ipynb`
+
+All numbers come from **leave-one-out** on your test set: every labelled box is a query once, searched against all other boxes and the distractors, with everything from its own photo left out. Every table has two levels of correctness side by side:
+- **item:** the exact object, the same label;
+- **model:** the same `group`, where boxes without a group count as their own group.
+
+**1. Setup.** The knobs of the run:
+- `TESTSET_DIR`, `DINO_MODEL`, `DINO_RESOLUTION`, `RETRIEVAL_K`, `SPARSE_K`;
+- `IOU_THRESHOLD` (0.3, for section 5);
+- `RUN_NAME` and `RESULTS_DIR` (for section 9).
+
+**2. Test set.** Loads `annotations.json`, prints the validator report (labels with a single box can't be queries) and the number of queries, distractors and groups. Without a test set it uses synthetic data, and section 5 is skipped.
+
+**3. Stage 1.** Random, color histogram, and DINOv2 `cls` / `crop_cls` / `masked_mean`, without re-ranking.
+
+**4. Stage 2.** DINOv2 `crop_cls` plus a verification variant:
+- the estimator (MAGSAC++ vs RANSAC);
+- the geometric model (`H`, `A`, `F`);
+- no masks, and plain SIFT;
+- the learned matchers (top 10).
+
+**5. Grounding: what if the photos had no boxes?** The boxes are hidden from the gallery, which becomes your test-set photos; the query boxes stay. Three variants:
+- **annotated boxes:** the upper bound;
+- **DINOv2 grounding:** a found region is correct if it overlaps a box of the right label with IoU ≥ `IOU_THRESHOLD`;
+- **whole images:** correct if the photo contains the object, anywhere.
+
+Each is shown at stage 1 and after SIFT, plus a localization table: the median IoU of the found regions with your boxes, and the share above 0.3 and 0.5.
+
+**6. Per-label breakdown.** For the default pipeline (DINOv2 `crop_cls` → SIFT H MAGSAC++): one row per label, hardest first, with queries, R@1, R@5, MRR, median rank and how many queries found nothing.
+
+**7. Failure gallery.** The worst queries drawn as result grids: the query box, then the top 5 per stage, with ✓/✗ at item level. `N_FAILURES` sets how many.
+
+**8. Latency.** Median and p95 per stage and in total, for every pipeline. **This is search cost, not interactive latency.** Every query box is also a gallery box, so its features were computed during indexing. A fresh query adds its own feature extraction: about 55 ms for DINOv2 at 448 px on an M2, plus the matcher's keypoints.
+
+**9. Save the results.** All tables as CSV in `results/<date-time>_<RUN_NAME>/` (gitignored), so runs can be compared over time.
+
 ---
 
 ## 6. Reading the scores and tables
 
-### Evaluation tables (stage 1 and stage 2 cells)
+### Evaluation tables (`evaluation.ipynb`)
 
-Each row is one pipeline, evaluated over all queries of a split.
+Each row is one pipeline, evaluated over all queries (leave-one-out: every labelled box once).
 
 | Column | Meaning |
 |---|---|
-| **R@1** | Recall@1: fraction of queries where the **first** result is a correct image. The headline number. |
-| **R@5** | Fraction of queries with at least one correct image in the **top 5**. |
-| **MRR** | Mean reciprocal rank: for each query take 1 / (rank of the first correct image), then average. 1.0 = always first, 0.5 = typically second. Queries whose correct image falls outside the returned list count as 0. |
-| **n_queries** | Number of queries evaluated. |
+| **R@1** | Recall@1: the share of queries whose **first** result is correct at *item* level (the exact object). The headline number. |
+| **R@5** | The share of queries with at least one correct result in the **top 5**. |
+| **MRR** | Mean reciprocal rank: for each query, 1 / (rank of the first correct result), averaged. 1.0 = always first, 0.5 = typically second. Queries whose correct result falls outside the returned list count as 0. |
+| **model R@1**, **model R@5**, **model MRR** | The same at *model* level: a result also counts when it has the query's `group` (e.g. the same sofa model). Never lower than the item-level numbers. |
+| **n_queries** | Number of queries evaluated. Queries whose object can't be found anywhere else (e.g. its only other box is in the same photo) are skipped. |
 | **stage** | Which stage's ranking the metrics refer to (the last stage of that pipeline). |
-| **total_median_ms**, **total_p95_ms** | Time per query (all stages, *excluding* offline gallery indexing): the median and the 95th percentile (the slow tail). |
+| **total_median_ms**, **total_p95_ms** | Search time per query (all stages, excluding indexing and, in leave-one-out, the query's own feature extraction): median and 95th percentile. |
 | **prepare_s** | Seconds spent indexing the gallery (offline, once; near zero when cached). |
 
-Every evaluation also returns `report.metrics` (one row per stage, so "stage 1 only" vs "after re-ranking" can be read from the same run), `report.latency` (median/p95/mean/max per stage) and `report.per_query`.
+**Grounding table** (section 5): the same columns, for three galleries (annotated boxes, DINOv2 grounding, whole images), at stage 1 and after SIFT. Here a grounded result is correct when its region overlaps an annotated box of the query's label (model level: of its group) with IoU ≥ `IOU_THRESHOLD`. A whole-image result is correct when the photo contains such a box.
+
+**Localization table:**
+- `median_iou`: per query, take the first found region in another photo that contains the object, and its IoU with that object's box; the median over all queries;
+- `share_iou_0.3` / `share_iou_0.5`: the share of those regions with IoU at or above 0.3 / 0.5.
+
+**Per-label table:** one row per label, hardest first.
+- `queries`: how many of its boxes were queries.
+- `R@k`, `MRR`: as above, for that label only.
+- `median rank`: of the first correct result.
+- `not found`: queries without any correct result in the list.
+
+In code, every evaluation returns:
+- `report.metrics`: one row per stage, so "stage 1 only" vs "after re-ranking" comes from the same run;
+- `report.latency`: median, p95, mean and max per stage;
+- `report.per_query`: rank per stage and level, top-1 and time per query.
 
 Three caveats when reading the numbers:
 - **Synthetic numbers are a smoke test.** The synthetic objects are flat and heavily textured, so stage 2 reaches R@1 = 1.0 for almost every variant. That shows the code works, not which variant is best.
-- **Your real set is currently trivial.** One query against two gallery images, so every method scores 1.0.
+- **Small test sets give jumpy numbers.** With 20 queries, one query is 5 percentage points of R@1.
 - **The first query after loading can be slow.** On a Mac, PyTorch on the GPU compiles kernels for each new image size; later queries are fast.
 
 ### Scores in the interactive gallery
@@ -412,7 +464,7 @@ Every thumbnail title reads, for example, `#1 41.623 ✓`, then the label, then 
 
 - **`#1`:** the rank in that stage.
 - **The score:** its meaning depends on the stage.
-  - Retrieval row: the **cosine similarity** between the query and gallery descriptions, from −1 to 1. In practice about 0.3 (unrelated) to above 0.8 (very similar). With grounding (section 7) it compares the query with a found **region**, and the crop shows that region.
+  - Retrieval row: the **cosine similarity** between the query and gallery descriptions, from −1 to 1. In practice about 0.3 (unrelated) to above 0.8 (very similar). With grounding (`search.ipynb` section 4) it compares the query with a found **region**, and the crop shows that region.
   - Sparse-stage row: **`inliers + cosine`**. `41.623` means 41 verified inliers plus a cosine of 0.623. A score below 1 means the geometric check failed (0 inliers) and only the cosine is left.
 - **✓ / ✗** (green / red frame): whether the result has the query's label. Only shown when the query is labelled.
 - **Score components** (stored in `candidate.features`):
@@ -455,7 +507,7 @@ The code separates **models** (neural networks that produce features or masks) f
 | `DinoRetriever(pooling="crop_cls")` | DINOv2 CLS token of the query **cropped to its prompt** | **Default**, the best stage-1 mode so far. One extra model run per query. |
 | `DinoRetriever(pooling="masked_mean")` | Average of DINOv2 patch features **under the prompt**, from the full-image pass | Instant when the prompt changes (no extra model run). Weaker than `crop_cls` on synthetic data. Benefits most from real SAM3 masks. |
 | `DinoRetriever(pooling="cls")` | CLS token of the whole query image | Ablation: ignores the prompt. |
-| `GroundedDinoRetriever` | Finds the query object inside each gallery photo (DINOv2 patch similarity) and ranks the **regions** (up to 3 per photo) | For unlabelled photo collections (notebook section 7). Results carry a `region` box. |
+| `GroundedDinoRetriever` | Finds the query object inside each gallery photo (DINOv2 patch similarity) and ranks the **regions** (up to 3 per photo) | For unlabelled photo collections (`search.ipynb` section 4). Results carry a `region` box. |
 
 ### Maskers (`masking/`)
 
@@ -588,7 +640,9 @@ src/visual_search/
   stages/       sparse.py       SparseVerificationStage (stage 2)
   cascade.py                    Cascade, RerankStage, QueryResult
   eval/         metrics.py      Recall@k, MRR
-                harness.py      evaluate(), comparison_table()
+                judges.py       when a result is correct: item / model (group) / grounded (IoU)
+                harness.py      run_evaluation, evaluate, evaluate_leave_one_out, comparison_table
+                inspect.py      per-label table, failure grids, localization stats, latency, CSV export
   cache.py                      on-disk feature cache
   device.py, timing.py, imaging.py   helpers (device choice, stage timers, prompt→box/mask)
   ui/           prompt_widget.py  draw box / click points (ipympl)
@@ -596,8 +650,10 @@ src/visual_search/
                 search_app.py     the interactive search app
   viz/          gallery.py, pairs.py, overlay.py   result grid, match/warp view, mask overlays
 
-notebooks/labeling.ipynb  build your own test set (boxes + labels)
-notebooks/cascade.ipynb   experiments, test-set search, new-gallery search
+notebooks/labeling.ipynb   build your own test set (boxes + labels)
+notebooks/search.ipynb     free play: test-set search, new-gallery search
+notebooks/evaluation.ipynb measurements and comparisons on the test set
+results/                   saved evaluation tables (gitignored)
 scripts/try_sam3.py       manual SAM3 go/no-go check (timings + overlay)
 tests/                    pytest suite, one file per area
 docs/log/                 change log: what changed, why, with numbers
@@ -618,13 +674,12 @@ From mlcvtools (read-only), the code reuses the ONNX model loader and provider s
 - **Latency was measured on an 8 GB M2 development machine,** not on the target 16 GB Mac or the GPU server.
 
 **Next steps.**
-1. **An evaluation notebook:** compare approaches on your test set. It will cover metrics per `group` (model level next to item level), grounding judged against your annotated boxes (does the found region overlap the right box?), and possibly a reorganization into labeling, free-play and evaluation notebooks.
-2. **Step 7, scoring:** spatial coverage of the query mask, mask overlap after warping, post-warp appearance difference, reprojection error and warp distortion, combined first with hand-set weights and later with weights learned from labelled data.
-3. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5, plus a displacement map in the detail view.
-4. **Step 9, full ablations** on real data and on target hardware.
+1. **Step 7, scoring:** spatial coverage of the query mask, mask overlap after warping, post-warp appearance difference, reprojection error and warp distortion, combined first with hand-set weights and later with weights learned from labelled data.
+2. **Step 8, dense matching:** RoMa (or EfficientLoFTR if RoMa is too slow) for the final top-5, plus a displacement map in the detail view.
+3. **Step 9, full ablations** on real data and on target hardware, using the evaluation notebook.
 
 **What you can do now.**
-- Label a test set in `notebooks/labeling.ipynb`, with several photos per object.
-- Try "Search a new gallery" (notebook section 7) on one of your own photo folders.
+- Label a test set in `notebooks/labeling.ipynb`, with several photos per object, and run `notebooks/evaluation.ipynb` on it for the first real numbers.
+- Try "Search a new gallery" (`search.ipynb`, section 4) on one of your own photo folders.
 - Test SAM3 fp16 on your 16 GB Mac and on the GPU server with `scripts/try_sam3.py`.
 - Decide how to label "same model": the same label (model level), or separate labels that share a `group` (item level, with the model recorded).

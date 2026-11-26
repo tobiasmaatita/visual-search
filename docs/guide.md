@@ -210,7 +210,7 @@ A photo often shows several objects, so a query can carry a **prompt**, meaning 
   ```
 - **Without a prompt**, the whole image counts as the object. That's fine for product-style photos with one object, but poor for room scenes. Your current `data/` has no prompts.
 
-Gallery images may also have prompts. If they do, matching on the gallery side is restricted to that region too. In practice the gallery is unprompted (see [section 4](#4-how-a-search-works-the-pipeline)).
+Gallery images may also have prompts; the boxes of your labelled test set are exactly that. Then matching on the gallery side is restricted to that box. Unlabelled photo collections have no boxes; there, grounding finds the object in each photo (see [section 4](#4-how-a-search-works-the-pipeline)).
 
 ### The underlying format and other sources
 
@@ -221,6 +221,7 @@ Under the folder convention, a dataset is simply a **list of dicts**, the format
 ```
 
 Any other key (for example a future `"group"` for hard-negative groups) is kept untouched in `Item.extra`, so the schema can grow without code changes. Besides the folder loader there are:
+- **`load_gallery(source)`:** an unlabelled gallery from a folder, a glob pattern or a list of files (used by "Search a new gallery").
 - **`load_image_folder(dir)`:** a folder of distractors from anywhere, e.g. a COCO image directory.
 - **`load_mlcvtools_annotations(json, image_root)`:** reads the boxes you drew in mlcvtools' `visual-search.ipynb` (`own-annotations.json`).
 - **`make_synthetic_dataset()`:** generated test data. **For smoke tests only:** random textured patches pasted into cluttered scenes, with known ground-truth masks and warps. It checks that the code runs, not which method is better.

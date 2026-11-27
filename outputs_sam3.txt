@@ -1,0 +1,6 @@
+load: 4.98 s from models/sam3 (variant 'fp16')
+run 0 (cold): total 16247 ms | encode 14436 ms, decode 1810 ms, select 1 ms
+run 1 (warm): total 1957 ms | encode 0 ms, decode 1955 ms, select 1 ms
+run 2 (warm): total 1717 ms | encode 0 ms, decode 1716 ms, select 1 ms
+source=sam3 score=0.8464508652687073 mask_area=0.099 alternatives=1
+overlay written to 00288_0_sam3.png

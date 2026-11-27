@@ -430,7 +430,7 @@ The animation starts with the result simply resized into your query box (t = 0) 
 
 **1. Setup.** The knobs:
 - `TOP_N`: results you can pick from;
-- `N_FRAMES`, `CANVAS_SIDE`, `TPS_STIFFNESS`;
+- `N_FRAMES`, `CANVAS_SIDE` (render resolution), `DISPLAY_WIDTH` (shown width in the notebook, default 360 px), `TPS_STIFFNESS`;
 - `OUTPUT_DIR` (`results/warps/`);
 - `GALLERY_SOURCE`: `None` = your test set, or a folder / glob / list of photos, searched with grounding.
 
@@ -445,7 +445,7 @@ The animation starts with the result simply resized into your query box (t = 0) 
    - **grid:** a grid on the candidate bends with the warp;
    - **flicker:** a blink between your query and the fully warped candidate;
    - **residual:** a difference heatmap inside your box that fades as the warp completes.
-4. **Warp ▶** renders and plays the animation in a loop. Play/pause, scrub with the frame slider, change the speed with fps.
+4. **Warp ▶** renders and plays the animation in a loop. Play/pause, scrub with the frame slider, change the speed with fps and the display size with size px.
 5. **Save GIF** writes the current animation to `results/warps/`.
 
 The table under the animation has one row per model:

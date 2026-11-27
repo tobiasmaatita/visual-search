@@ -74,6 +74,7 @@ class WarpApp:
         output_dir: str | Path = "results/warps",
         n_frames: int = 24,
         canvas_side: int = 480,
+        display_width: int = 360,
         tps_stiffness: float = 0.05,
         show_expected_label: bool = True,
     ) -> None:
@@ -88,7 +89,10 @@ class WarpApp:
             matcher: Matcher for pairs that did not go through a matching stage.
             output_dir: Where **Save GIF** writes.
             n_frames: Frames from unwarped to fully warped.
-            canvas_side: Longer side of the animation in pixels.
+            canvas_side: Longer side of the rendered animation in pixels (resolution of frames and GIFs).
+            display_width: Width in pixels at which one animation panel is *shown* in the notebook,
+                whatever ``canvas_side`` is; side-by-side mode is shown three panels wide. Also
+                adjustable with the app's "size" slider.
             tps_stiffness: Smoothness of the thin-plate spline (0 = exact through all matches).
             show_expected_label: Show the search app's "Expected" field (✓/✗ marks).
         """
@@ -97,6 +101,7 @@ class WarpApp:
         self.output_dir = Path(output_dir)
         self.n_frames = n_frames
         self.canvas_side = canvas_side
+        self.display_width = display_width
         self.tps_stiffness = tps_stiffness
         self.search_app = SearchApp(cascade, gallery, queries, masker=masker, top_k=top_n,
                                     show_expected_label=show_expected_label)
@@ -118,12 +123,15 @@ class WarpApp:
         self.compare = widgets.Checkbox(value=False, description="all models side by side", indent=False)
         self.warp_button = widgets.Button(description="Warp ▶", button_style="success")
         self.pair_image = widgets.Image(format="png", layout=widgets.Layout(max_width="100%"))
+        self.size = widgets.IntSlider(value=display_width, min=160, max=960, step=20, description="size px",
+                                      continuous_update=False)
         self.info = widgets.HTML()
         self.play = widgets.Play(value=0, min=0, max=0, step=1, interval=80, description="play")
         self.slider = widgets.IntSlider(value=0, min=0, max=0, description="frame", continuous_update=True)
         self.speed = widgets.IntSlider(value=12, min=2, max=30, description="fps")
         widgets.jslink((self.play, "value"), (self.slider, "value"))
         self.frame_image = widgets.Image(format="png", layout=widgets.Layout(max_width="100%"))
+        self._apply_size()
         self.stats = widgets.HTML()
         self.save_button = widgets.Button(description="Save GIF", icon="download")
         self.save_info = widgets.HTML()
@@ -136,7 +144,7 @@ class WarpApp:
             self.info,
             self.model,
             widgets.HBox([self.view, self.compare]),
-            widgets.HBox([self.warp_button, self.play, self.slider, self.speed]),
+            widgets.HBox([self.warp_button, self.play, self.slider, self.speed, self.size]),
             self.frame_image,
             self.stats,
             widgets.HBox([self.save_button, self.save_info]),
@@ -148,6 +156,7 @@ class WarpApp:
         self.speed.observe(lambda ch: setattr(self.play, "interval", int(1000 / ch["new"])), names="value")
         self.play.interval = int(1000 / self.speed.value)
         self.save_button.on_click(lambda _: self.save())
+        self.size.observe(lambda ch: self._apply_size(ch["new"]), names="value")
 
     # --- actions ------------------------------------------------------------------------
 
@@ -235,6 +244,8 @@ class WarpApp:
                                    f"{html.escape(self.fitted.notes.get(model, 'too few matches'))}</span>"
             return []
         self._png = [encode_png(f) for f in self.frames]
+        self._panels = len([m for m in MODELS if m in self.fitted.warps]) if self.compare.value else 1
+        self._apply_size()
         self.play.playing = False
         self.play.max = self.slider.max = len(self.frames) - 1
         self.play.value = self.slider.value = 0
@@ -277,6 +288,16 @@ class WarpApp:
         ]
         self.candidate.value = None
         self._cache.clear()
+
+    def _apply_size(self, width: int | None = None) -> None:
+        """Show the animation (and the pair preview) at a fixed width, independent of the render size."""
+        if width is not None:
+            self.display_width = width
+        panels = getattr(self, "_panels", 1)
+        self.frame_image.layout.width = f"{self.display_width * panels}px"
+        self.frame_image.layout.height = "auto"
+        self.pair_image.layout.width = f"{self.display_width * 2}px"
+        self.pair_image.layout.height = "auto"
 
     def _clear_animation(self) -> None:
         """Stop playing and clear the frames."""

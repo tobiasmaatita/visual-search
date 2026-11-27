@@ -174,9 +174,13 @@ def test_warp_app(records: list[dict], tmp_path: Path) -> None:
     assert len(frames) == 5 + 8 and app.play.max == len(frames) - 1 and app.play.playing
     app.slider.value = 3
     assert app.frame_image.value == app._png[3]
+    assert app.frame_image.layout.width == "360px" and app.pair_image.layout.width == "720px"
+    app.size.value = 240  # the size slider resizes the display, not the rendering
+    assert app.frame_image.layout.width == "240px" and app.frames[0].shape[1] == frames[0].shape[1]
     app.compare.value = True
     wide = app.warp()
     assert wide and wide[0].shape[1] > frames[0].shape[1]
+    assert app.frame_image.layout.width == f"{240 * len(app.fitted.warps)}px"
     path = app.save()
     assert path is not None and path.exists() and path.suffix == ".gif"
     app.candidate.value = 3  # beyond stage 2's top-2: matches are computed on the spot
